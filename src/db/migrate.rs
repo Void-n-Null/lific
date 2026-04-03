@@ -18,6 +18,7 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "api keys",
         include_str!("../../migrations/003_api_keys.sql"),
     ),
+    (4, "oauth", include_str!("../../migrations/004_oauth.sql")),
 ];
 
 /// Ensure the migrations table exists and apply any pending migrations.

@@ -179,14 +179,24 @@ pub async fn require_api_key(
         }
     };
 
+    // Check OAuth tokens first (lific_at_ prefix)
+    if secure_token.expose_secret().starts_with("lific_at_") {
+        if crate::oauth::validate_oauth_token(&auth.db, secure_token.expose_secret()) {
+            return next.run(request).await;
+        }
+        return (
+            StatusCode::UNAUTHORIZED,
+            [("WWW-Authenticate", "Bearer")],
+            "Invalid or expired OAuth token",
+        )
+            .into_response();
+    }
+
     if hashes.is_empty() {
-        // No keys configured -- this shouldn't happen after auto-generate,
-        // but if it does, allow access with a warning
         warn!("no API keys configured, allowing unauthenticated access");
         return next.run(request).await;
     }
 
-    // Try each hash -- BLAKE3 checksum rejects fast, only matching keys hit Argon2
     for hash in &hashes {
         match auth.manager.verify(&secure_token, hash) {
             Ok(KeyStatus::Valid) => {
@@ -197,7 +207,7 @@ pub async fn require_api_key(
         }
     }
 
-    warn!("rejected invalid API key");
+    warn!("rejected invalid API key or OAuth token");
     (
         StatusCode::UNAUTHORIZED,
         [("WWW-Authenticate", "Bearer")],

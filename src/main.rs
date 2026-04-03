@@ -7,6 +7,7 @@ mod db;
 mod error;
 mod import;
 mod mcp;
+mod oauth;
 
 use std::sync::Arc;
 
@@ -172,8 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mcp_config,
             );
 
-            // Build router with auth middleware on all routes except /api/health
-            let app = api::router(pool.clone())
+            // Routes behind auth: REST API + MCP
+            let authed_routes = api::router(pool.clone())
                 .route(
                     "/mcp",
                     any(move |request: Request<Body>| async move {
@@ -185,9 +186,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     auth_middleware_wrapper,
                 ));
 
+            // OAuth routes (no auth -- they handle their own)
+            let issuer = cfg
+                .server
+                .public_url
+                .clone()
+                .unwrap_or_else(|| format!("http://{}:{}", cfg.server.host, cfg.server.port));
+            let oauth_state = oauth::OAuthState {
+                db: pool.clone(),
+                issuer,
+            };
+
+            let app = authed_routes.merge(oauth::router(oauth_state));
+
             let addr = format!("{}:{}", cfg.server.host, cfg.server.port);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
-            info!(addr = %addr, "lific server started (REST + MCP at /mcp)");
+            info!(addr = %addr, "lific server started (REST + MCP + OAuth at /mcp)");
 
             let shutdown_pool = pool.clone();
             let server =
@@ -259,7 +273,8 @@ async fn auth_middleware_wrapper(
     request: Request<Body>,
     next: middleware::Next,
 ) -> axum::response::Response {
-    if request.uri().path() == "/api/health" {
+    let path = request.uri().path();
+    if path == "/api/health" || path.starts_with("/.well-known/") || path.starts_with("/oauth/") {
         return next.run(request).await;
     }
     auth::require_api_key(state, request, next).await

@@ -21,6 +21,8 @@ pub struct ServerConfig {
     pub host: String,
     /// Port to listen on
     pub port: u16,
+    /// Public URL for OAuth discovery (e.g. https://your-server.example.com/lific)
+    pub public_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +57,7 @@ impl Default for ServerConfig {
         Self {
             host: "0.0.0.0".to_string(),
             port: 3456,
+            public_url: None,
         }
     }
 }
