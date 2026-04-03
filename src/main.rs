@@ -215,6 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             handle.waiting().await?;
         }
 
+        #[cfg(feature = "plane-import")]
         Command::ImportPlane {
             url,
             api_key,

@@ -108,3 +108,14 @@ jobs:
             binaries/lific-windows-x86_64.exe
             binaries/lific-windows-aarch64.exe
             binaries/sha256sums.txt
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

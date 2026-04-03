@@ -39,7 +39,8 @@ pub enum Command {
     /// Generate a default lific.toml config file
     Init,
 
-    /// Import projects, issues, and data from Plane
+    /// Import projects, issues, and data from the Plane API (requires --features plane-import)
+    #[cfg(feature = "plane-import")]
     ImportPlane {
         /// Plane API base URL (e.g. http://localhost:8585)
         #[arg(long, env = "PLANE_BASE_URL")]
@@ -58,7 +59,7 @@ pub enum Command {
         skip: Vec<String>,
     },
 
-    /// Import from a pre-exported Plane JSON file (advanced)
+    /// Import from a pre-exported Plane JSON file
     ImportFile {
         /// Path to the JSON export file
         file: PathBuf,

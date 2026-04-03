@@ -373,6 +373,7 @@ pub fn run_import(
     Ok(())
 }
 
+#[cfg(feature = "plane-import")]
 #[derive(Debug, Deserialize, Serialize)]
 struct PaginatedResponse<T> {
     results: Vec<T>,
@@ -380,6 +381,7 @@ struct PaginatedResponse<T> {
     next_page_results: Option<bool>,
 }
 
+#[cfg(feature = "plane-import")]
 /// Fetch all Plane data via the REST API and import it.
 pub async fn run_api_import(
     pool: &DbPool,
@@ -581,6 +583,7 @@ pub async fn run_api_import(
     import_export(pool, &export, skip_identifiers)
 }
 
+#[cfg(feature = "plane-import")]
 /// Fetch all pages of a paginated Plane API endpoint.
 async fn fetch_paginated<T: serde::de::DeserializeOwned>(
     client: &reqwest::Client,
@@ -638,6 +641,7 @@ async fn fetch_paginated<T: serde::de::DeserializeOwned>(
     Ok(all)
 }
 
+#[cfg(feature = "plane-import")]
 /// Fetch raw JSON array for endpoints with non-standard response format.
 async fn fetch_raw_array(
     client: &reqwest::Client,
@@ -662,6 +666,7 @@ async fn fetch_raw_array(
     }
 }
 
+#[cfg(feature = "plane-import")]
 /// Shared import logic used by both file-based and API-based import.
 fn import_export(
     pool: &DbPool,
