@@ -159,3 +159,131 @@ pub fn checkpoint_wal(pool: &DbPool) {
         Err(e) => warn!(error = %e, "could not acquire write connection for checkpoint"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn make_temp_dir() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "lific_backup_test_{}_{n}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn rotate_keeps_only_retain_count() {
+        let dir = make_temp_dir();
+
+        // Create 5 fake backup files with lexicographic timestamps
+        for i in 1..=5 {
+            fs::write(dir.join(format!("lific_2026010{i}_120000.db")), "fake").unwrap();
+        }
+
+        rotate_backups(&dir, "lific", 3);
+
+        let remaining: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(remaining.len(), 3);
+
+        // Oldest two (01, 02) should be gone, newest three (03, 04, 05) kept
+        assert!(!dir.join("lific_20260101_120000.db").exists());
+        assert!(!dir.join("lific_20260102_120000.db").exists());
+        assert!(dir.join("lific_20260103_120000.db").exists());
+        assert!(dir.join("lific_20260105_120000.db").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rotate_does_nothing_under_retain() {
+        let dir = make_temp_dir();
+
+        fs::write(dir.join("lific_20260101_120000.db"), "fake").unwrap();
+        fs::write(dir.join("lific_20260102_120000.db"), "fake").unwrap();
+
+        rotate_backups(&dir, "lific", 5);
+
+        let count = fs::read_dir(&dir).unwrap().count();
+        assert_eq!(count, 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rotate_ignores_other_files() {
+        let dir = make_temp_dir();
+
+        // These should be ignored (wrong prefix / extension)
+        fs::write(dir.join("other_20260101_120000.db"), "x").unwrap();
+        fs::write(dir.join("lific_20260101_120000.txt"), "x").unwrap();
+        // These are real backups
+        fs::write(dir.join("lific_20260101_120000.db"), "x").unwrap();
+        fs::write(dir.join("lific_20260102_120000.db"), "x").unwrap();
+
+        rotate_backups(&dir, "lific", 1);
+
+        // Only 1 backup kept, non-matching files untouched
+        assert!(dir.join("other_20260101_120000.db").exists());
+        assert!(dir.join("lific_20260101_120000.txt").exists());
+        assert!(!dir.join("lific_20260101_120000.db").exists()); // oldest removed
+        assert!(dir.join("lific_20260102_120000.db").exists()); // kept
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn run_backup_creates_valid_db() {
+        let dir = make_temp_dir();
+        let db_path = dir.join("source.db");
+        let backup_dir = dir.join("backups");
+        fs::create_dir_all(&backup_dir).unwrap();
+
+        // Create a real pool with some data
+        let pool = crate::db::open(&db_path).expect("open test db");
+        {
+            let conn = pool.write().unwrap();
+            crate::db::queries::create_project(
+                &conn,
+                &crate::db::models::CreateProject {
+                    name: "BackupTest".into(),
+                    identifier: "BKP".into(),
+                    description: String::new(),
+                    emoji: None,
+                },
+            )
+            .unwrap();
+        }
+
+        run_backup(&pool, &db_path, &backup_dir, 5);
+
+        // Should have exactly one backup file
+        let backups: Vec<_> = fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|e| e.to_str()) == Some("db"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+
+        // Verify the backup is a valid SQLite DB with our data
+        let backup_conn = rusqlite::Connection::open(backups[0].path()).unwrap();
+        let name: String = backup_conn
+            .query_row("SELECT name FROM projects WHERE identifier = 'BKP'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(name, "BackupTest");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+}

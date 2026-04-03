@@ -144,3 +144,110 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn defaults_are_sensible() {
+        let config = Config::default();
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 3456);
+        assert_eq!(config.database.path, PathBuf::from("lific.db"));
+        assert!(config.backup.enabled);
+        assert_eq!(config.backup.retain, 24);
+        assert_eq!(config.log.level, "info");
+    }
+
+    #[test]
+    fn load_from_explicit_path() {
+        let dir = std::env::temp_dir().join(format!("lific_cfg_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.toml");
+
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"
+[server]
+port = 9999
+host = "127.0.0.1"
+
+[database]
+path = "/tmp/custom.db"
+
+[backup]
+enabled = false
+"#
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&path));
+        assert_eq!(config.server.port, 9999);
+        assert_eq!(config.server.host, "127.0.0.1");
+        assert_eq!(config.database.path, PathBuf::from("/tmp/custom.db"));
+        assert!(!config.backup.enabled);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_file_returns_defaults() {
+        let config = Config::load(Some(Path::new("/tmp/nonexistent_lific_cfg_12345.toml")));
+        assert_eq!(config.server.port, 3456);
+    }
+
+    #[test]
+    fn invalid_toml_returns_defaults() {
+        let dir = std::env::temp_dir().join(format!("lific_bad_cfg_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.toml");
+        std::fs::write(&path, "{{{{not valid toml!!!!").unwrap();
+
+        let config = Config::load(Some(&path));
+        assert_eq!(config.server.port, 3456); // fell back to defaults
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn partial_config_fills_defaults() {
+        let dir = std::env::temp_dir().join(format!("lific_partial_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("partial.toml");
+        std::fs::write(&path, "[server]\nport = 7777\n").unwrap();
+
+        let config = Config::load(Some(&path));
+        assert_eq!(config.server.port, 7777);
+        assert_eq!(config.server.host, "0.0.0.0"); // default
+        assert_eq!(config.database.path, PathBuf::from("lific.db")); // default
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn backup_dir_resolves_relative_to_db() {
+        let mut config = Config::default();
+        config.database.path = PathBuf::from("/data/lific/main.db");
+        config.backup.dir = PathBuf::from("backups");
+
+        assert_eq!(config.backup_dir(), PathBuf::from("/data/lific/backups"));
+    }
+
+    #[test]
+    fn backup_dir_absolute_stays_absolute() {
+        let mut config = Config::default();
+        config.backup.dir = PathBuf::from("/mnt/backups");
+
+        assert_eq!(config.backup_dir(), PathBuf::from("/mnt/backups"));
+    }
+
+    #[test]
+    fn default_toml_roundtrips() {
+        let toml_str = Config::default_toml();
+        let parsed: Config = toml::from_str(&toml_str).expect("default toml should parse");
+        assert_eq!(parsed.server.port, 3456);
+    }
+}
