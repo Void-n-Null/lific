@@ -52,6 +52,11 @@ http-body-util = "0.1"
 
 [profile.release]
 opt-level = 3
+strip = true
+
+# For distribution builds (AUR, GitHub releases):
+# cargo build --profile release-dist
+[profile.release-dist]
+inherits = "release"
 lto = true
 codegen-units = 1
-strip = true
