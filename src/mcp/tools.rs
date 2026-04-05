@@ -878,25 +878,6 @@ impl LificMcp {
             },
         };
 
-        // For MCP, we need a user_id. Look for the first admin user, or first user.
-        // In production, the MCP session will be tied to a user via API key.
-        // For now, use a best-effort lookup.
-        let user_id = match self.read(|conn| {
-            queries::users::list_users(conn).map(|users| {
-                users
-                    .iter()
-                    .find(|u| u.is_admin)
-                    .or(users.first())
-                    .map(|u| u.id)
-            })
-        }) {
-            Ok(Some(id)) => id,
-            _ => {
-                return "Error: no users exist. Create a user first with `lific user create`."
-                    .into()
-            }
-        };
-
         match self.write(|conn| {
             queries::comments::create_comment(conn, issue_id, user_id, &input.content)
         }) {
