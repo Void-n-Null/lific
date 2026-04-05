@@ -105,10 +105,20 @@ async fn health() -> &'static str {
 
 // ── Auth endpoints ───────────────────────────────────────────
 
+/// Public signup request — intentionally excludes is_admin and is_bot
+/// to prevent privilege escalation. Those can only be set via CLI.
+#[derive(serde::Deserialize)]
+struct SignupRequest {
+    username: String,
+    email: String,
+    password: String,
+    display_name: Option<String>,
+}
+
 async fn auth_signup(
     State(db): State<DbPool>,
     Extension(auth_cfg): Extension<crate::config::AuthConfig>,
-    Json(input): Json<CreateUser>,
+    Json(input): Json<SignupRequest>,
 ) -> Result<Json<serde_json::Value>, LificError> {
     if !auth_cfg.allow_signup {
         return Err(LificError::BadRequest(
@@ -117,7 +127,17 @@ async fn auth_signup(
     }
 
     let conn = db.write()?;
-    let user = queries::users::create_user(&conn, &input)?;
+    let user = queries::users::create_user(
+        &conn,
+        &CreateUser {
+            username: input.username,
+            email: input.email,
+            password: input.password,
+            display_name: input.display_name,
+            is_admin: false,
+            is_bot: false,
+        },
+    )?;
     let session = queries::users::create_session(&conn, user.id, None)?;
 
     Ok(Json(serde_json::json!({
