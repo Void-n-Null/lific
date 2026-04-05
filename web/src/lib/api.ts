@@ -262,6 +262,12 @@ export async function updateIssue(id: number, input: UpdateIssueInput) {
   });
 }
 
+export async function deleteIssue(id: number) {
+  return request<{ deleted: boolean }>(`/issues/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // ── Modules ─────────────────────────────────────────────────
 
 export interface Module {
