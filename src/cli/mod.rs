@@ -121,6 +121,20 @@ pub enum UserAction {
 
     /// List all user accounts
     List,
+
+    /// Promote a user to admin
+    Promote {
+        /// Username to promote
+        #[arg(short, long)]
+        username: String,
+    },
+
+    /// Demote an admin to regular user
+    Demote {
+        /// Username to demote
+        #[arg(short, long)]
+        username: String,
+    },
 }
 
 #[cfg(test)]

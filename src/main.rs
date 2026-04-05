@@ -226,6 +226,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                UserAction::Promote { username } => {
+                    let conn = pool.write()?;
+                    db::queries::users::set_admin(&conn, &username, true)?;
+                    println!("Promoted '{username}' to admin.");
+                }
+                UserAction::Demote { username } => {
+                    let conn = pool.write()?;
+                    db::queries::users::set_admin(&conn, &username, false)?;
+                    println!("Demoted '{username}' from admin.");
+                }
             }
             return Ok(());
         }

@@ -328,6 +328,18 @@ pub fn create_bot_user(
     get_user_by_id(conn, bot_user_id)
 }
 
+/// Set or unset admin status on a user.
+pub fn set_admin(conn: &Connection, username: &str, is_admin: bool) -> Result<(), LificError> {
+    let changed = conn.execute(
+        "UPDATE users SET is_admin = ?1, updated_at = datetime('now') WHERE username = ?2 COLLATE NOCASE",
+        params![is_admin, username],
+    )?;
+    if changed == 0 {
+        return Err(LificError::NotFound(format!("user '{username}' not found")));
+    }
+    Ok(())
+}
+
 /// Find a bot user by username (for reconnection checks).
 pub fn find_bot_by_username(
     conn: &Connection,
