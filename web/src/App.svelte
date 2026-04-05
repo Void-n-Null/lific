@@ -4,6 +4,7 @@
   import Settings from "./routes/Settings.svelte";
   import IssueList from "./routes/IssueList.svelte";
   import IssueDetail from "./routes/IssueDetail.svelte";
+  import IssueNew from "./routes/IssueNew.svelte";
   import Layout from "./lib/Layout.svelte";
   import { hasSession, listProjects } from "./lib/api";
 
@@ -64,6 +65,10 @@
     project: string;
   } | {
     type: "app";
+    page: "issue-new";
+    project: string;
+  } | {
+    type: "app";
     page: "issue-detail";
     project: string;
     identifier: string;
@@ -81,6 +86,12 @@
     const issueListMatch = r.match(/^\/([A-Za-z][A-Za-z0-9_-]*)\/issues$/i);
     if (issueListMatch) {
       return { type: "app", page: "issues", project: issueListMatch[1] };
+    }
+
+    // Project-scoped: /{IDENTIFIER}/issues/new
+    const issueNewMatch = r.match(/^\/([A-Za-z][A-Za-z0-9_-]*)\/issues\/new$/i);
+    if (issueNewMatch) {
+      return { type: "app", page: "issue-new", project: issueNewMatch[1] };
     }
 
     // Project-scoped: /{IDENTIFIER}/issues/{ISSUE-ID}
@@ -122,6 +133,8 @@
       <Settings {navigate} />
     {:else if parsed.page === "issues"}
       <IssueList {navigate} projectIdentifier={parsed.project} />
+    {:else if parsed.page === "issue-new"}
+      <IssueNew {navigate} projectIdentifier={parsed.project} />
     {:else if parsed.page === "issue-detail"}
       <IssueDetail
         {navigate}

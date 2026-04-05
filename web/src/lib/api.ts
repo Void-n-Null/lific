@@ -224,6 +224,23 @@ export async function getIssue(id: number) {
   return request<Issue>(`/issues/${id}`);
 }
 
+export interface CreateIssueInput {
+  project_id: number;
+  title: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  module_id?: number;
+  labels?: string[];
+}
+
+export async function createIssue(input: CreateIssueInput) {
+  return request<Issue>("/issues", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function resolveIssue(identifier: string) {
   return request<Issue>(`/issues/resolve/${identifier}`);
 }

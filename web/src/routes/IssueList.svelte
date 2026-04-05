@@ -191,8 +191,22 @@
         {/if}
       </div>
 
-      <!-- Search -->
-      <div class="relative">
+      <div class="flex items-center gap-2">
+        <!-- Create -->
+        <button
+          class="flex items-center gap-1.5 text-[0.8125rem] font-medium
+                 text-[var(--accent-text)] bg-[var(--accent)] px-2.5 py-1.5
+                 rounded-md hover:bg-[var(--accent-hover)] transition-colors"
+          onclick={() => navigate(`/${projectIdentifier}/issues/new`)}
+        >
+          <svg class="size-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M7.25 1a.75.75 0 0 1 .75.75V7h5.25a.75.75 0 0 1 0 1.5H8v5.25a.75.75 0 0 1-1.5 0V8.5H1.25a.75.75 0 0 1 0-1.5H6.5V1.75A.75.75 0 0 1 7.25 1Z"/>
+          </svg>
+          New
+        </button>
+
+        <!-- Search -->
+        <div class="relative">
         <svg
           class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5
                  text-[var(--text-faint)] pointer-events-none"
@@ -210,6 +224,7 @@
                  focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-subtle)]
                  transition-all"
         />
+        </div>
       </div>
     </div>
 
