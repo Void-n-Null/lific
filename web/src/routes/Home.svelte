@@ -3,25 +3,30 @@
     me,
     logout,
     clearSession,
-    listKeys,
-    createKey,
-    revokeKey,
+    listBots,
+    createBot,
+    disconnectBot,
+    TOOL_TEMPLATES,
     type AuthUser,
-    type ApiKey,
+    type Bot,
+    type ToolTemplate,
   } from "../lib/api";
   import ThemeToggle from "../lib/ThemeToggle.svelte";
 
   let { navigate }: { navigate: (path: string) => void } = $props();
 
   let user = $state<AuthUser | null>(null);
-  let keys = $state<ApiKey[]>([]);
+  let bots = $state<Bot[]>([]);
   let loading = $state(true);
 
-  let newKeyName = $state("");
-  let creatingKey = $state(false);
+  // Connection flow
+  let connecting = $state(false);
+  let selectedTool = $state<ToolTemplate | null>(null);
   let createdKey = $state<string | null>(null);
-  let keyError = $state("");
-  let revokingId = $state<number | null>(null);
+  let connectError = $state("");
+
+  // Disconnect
+  let disconnectingId = $state<number | null>(null);
 
   $effect(() => {
     loadUser();
@@ -31,7 +36,7 @@
     const result = await me();
     if (result.ok) {
       user = result.data;
-      await loadKeys();
+      await loadBots();
     } else {
       clearSession();
       navigate("/login");
@@ -39,9 +44,9 @@
     loading = false;
   }
 
-  async function loadKeys() {
-    const result = await listKeys();
-    if (result.ok) keys = result.data;
+  async function loadBots() {
+    const result = await listBots();
+    if (result.ok) bots = result.data;
   }
 
   async function handleLogout() {
@@ -50,34 +55,38 @@
     navigate("/login");
   }
 
-  async function handleCreateKey(e: Event) {
-    e.preventDefault();
-    keyError = "";
+  function startConnect(template: ToolTemplate) {
+    selectedTool = template;
     createdKey = null;
-
-    const name = newKeyName.trim();
-    if (!name) {
-      keyError = "Give your key a name.";
-      return;
-    }
-
-    creatingKey = true;
-    const result = await createKey(name);
-    if (result.ok) {
-      createdKey = result.data.key;
-      newKeyName = "";
-      await loadKeys();
-    } else {
-      keyError = result.error;
-    }
-    creatingKey = false;
+    connectError = "";
   }
 
-  async function handleRevoke(id: number) {
-    revokingId = id;
-    await revokeKey(id);
-    await loadKeys();
-    revokingId = null;
+  function cancelConnect() {
+    selectedTool = null;
+    createdKey = null;
+    connectError = "";
+  }
+
+  async function confirmConnect() {
+    if (!selectedTool) return;
+    connecting = true;
+    connectError = "";
+
+    const result = await createBot(selectedTool.id);
+    if (result.ok) {
+      createdKey = result.data.key;
+      await loadBots();
+    } else {
+      connectError = result.error;
+    }
+    connecting = false;
+  }
+
+  async function handleDisconnect(id: number) {
+    disconnectingId = id;
+    await disconnectBot(id);
+    await loadBots();
+    disconnectingId = null;
   }
 
   function initials(name: string): string {
@@ -96,6 +105,12 @@
       year: "numeric",
     });
   }
+
+  function isToolConnected(toolId: string): boolean {
+    return bots.some(
+      (b) => b.username.startsWith(toolId + "-") && b.has_active_key
+    );
+  }
 </script>
 
 <div class="min-h-dvh flex flex-col">
@@ -107,7 +122,6 @@
       ></div>
     </div>
   {:else if user}
-    <!-- Top bar -->
     <header
       class="flex items-center justify-between px-6 py-3
              border-b border-[var(--border)]"
@@ -134,9 +148,8 @@
       </div>
     </header>
 
-    <!-- Main content -->
     <main class="flex-1 flex justify-center px-6 py-10 md:py-16">
-      <div class="w-full max-w-[560px]">
+      <div class="w-full max-w-[600px]">
 
         <!-- User info -->
         <section class="mb-10 animate-reveal delay-100">
@@ -155,7 +168,6 @@
             </h1>
           </div>
 
-          <!-- Info grid -->
           <div
             class="grid grid-cols-3 max-sm:grid-cols-1
                    gap-px bg-[var(--border)] border border-[var(--border)]
@@ -181,136 +193,215 @@
           </div>
         </section>
 
-        <!-- API Keys -->
+        <!-- Connected Tools -->
         <section class="animate-reveal delay-250">
           <div class="mb-6">
             <h2 class="font-display text-[1.375rem] text-[var(--text)] mb-1">
-              API Keys
+              Connected Tools
             </h2>
             <p class="text-[0.875rem] text-[var(--text-muted)]">
-              Keys authenticate CLI tools, MCP clients, and scripts acting on your behalf.
+              Link your AI coding tools to Lific. Each connection creates a bot identity that acts on your behalf.
             </p>
           </div>
 
-          <!-- Create form -->
-          <form onsubmit={handleCreateKey} class="flex gap-2 mb-4">
-            <input
-              type="text"
-              bind:value={newKeyName}
-              placeholder="Key name (e.g. opencode, laptop, ci)"
-              disabled={creatingKey}
-              class="flex-1 rounded-md px-3 py-2 text-[0.9375rem]"
-            />
-            <button
-              type="submit"
-              disabled={creatingKey}
-              class="shrink-0 rounded-md bg-[var(--accent)] text-[var(--accent-text)]
-                     text-[0.875rem] font-medium px-4 py-2
-                     whitespace-nowrap transition-all duration-200
-                     hover:bg-[var(--accent-hover)] active:scale-[0.98]
-                     disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {creatingKey ? "Creating..." : "Create key"}
-            </button>
-          </form>
-
-          {#if keyError}
+          <!-- Connection flow overlay -->
+          {#if selectedTool}
             <div
-              class="text-sm text-[var(--error)] bg-[var(--error-bg)]
-                     px-4 py-2 rounded-md border-l-[3px] border-[var(--error)] mb-4"
-              role="alert"
+              class="border border-[var(--border)] rounded-md p-5 mb-6
+                     bg-[var(--surface)]"
             >
-              {keyError}
-            </div>
-          {/if}
-
-          {#if createdKey}
-            <div
-              class="bg-[var(--success-bg)] border-l-[3px] border-[var(--success)]
-                     rounded-md p-4 mb-4"
-            >
-              <div class="flex items-baseline gap-2 mb-2">
-                <strong class="text-[var(--success)] text-sm">Key created</strong>
-                <span class="text-[0.8125rem] text-[var(--text-muted)]">
-                  Copy it now — it won't be shown again.
-                </span>
-              </div>
-              <div
-                class="flex items-center gap-2 bg-[var(--surface)]
-                       border border-[var(--border)] rounded px-3 py-2"
-              >
-                <code
-                  class="flex-1 font-mono text-[0.8125rem] text-[var(--text)]
-                         break-all"
-                >
-                  {createdKey}
-                </code>
-                <button
-                  class="shrink-0 text-[0.75rem] font-semibold uppercase
-                         tracking-wide text-[var(--accent)] px-2 py-1
-                         rounded transition-colors
-                         hover:bg-[var(--accent-subtle)]"
-                  onclick={() => navigator.clipboard.writeText(createdKey!)}
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Key list -->
-          {#if keys.length === 0}
-            <p class="text-[0.875rem] text-[var(--text-faint)] py-6">
-              No keys yet. Create one to get started.
-            </p>
-          {:else}
-            <div class="border border-[var(--border)] rounded-md overflow-hidden">
-              {#each keys as key, i (key.id)}
-                <div
-                  class="flex items-center justify-between px-4 py-3
-                         bg-[var(--surface)] gap-4
-                         {i > 0 ? 'border-t border-[var(--border)]' : ''}"
-                  class:opacity-50={key.revoked}
-                >
-                  <div class="flex flex-col gap-0.5 min-w-0">
-                    <span class="text-[0.9375rem] font-medium text-[var(--text)] truncate">
-                      {key.name}
-                    </span>
-                    <span class="text-[0.75rem] text-[var(--text-faint)] flex items-center gap-2">
-                      Created {formatDate(key.created_at)}
-                      {#if key.revoked}
-                        <span
-                          class="text-[0.6875rem] font-semibold uppercase tracking-wide
-                                 text-[var(--error)] bg-[var(--error-bg)]
-                                 px-1.5 py-0.5 rounded"
-                        >
-                          Revoked
-                        </span>
-                      {:else}
-                        <span
-                          class="text-[0.6875rem] font-semibold uppercase tracking-wide
-                                 text-[var(--success)] bg-[var(--success-bg)]
-                                 px-1.5 py-0.5 rounded"
-                        >
-                          Active
-                        </span>
-                      {/if}
-                    </span>
-                  </div>
-                  {#if !key.revoked}
-                    <button
-                      class="shrink-0 text-[0.8125rem] text-[var(--error)]
-                             px-2 py-1 rounded transition-colors
-                             hover:bg-[var(--error-bg)]
-                             disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={revokingId === key.id}
-                      onclick={() => handleRevoke(key.id)}
-                    >
-                      {revokingId === key.id ? "Revoking..." : "Revoke"}
-                    </button>
+              {#if createdKey}
+                <!-- Success: show config snippet -->
+                <div class="mb-4">
+                  <h3 class="text-[0.9375rem] font-semibold text-[var(--text)] mb-1">
+                    {selectedTool.name} connected
+                  </h3>
+                  <p class="text-[0.8125rem] text-[var(--text-muted)]">
+                    Add this to <code class="font-mono text-[0.8125rem] bg-[var(--bg-subtle)] px-1.5 py-0.5 rounded">{selectedTool.configPath}</code>
+                  </p>
+                  {#if selectedTool.configNote}
+                    <p class="text-[0.75rem] text-[var(--text-faint)] mt-1">
+                      {selectedTool.configNote}
+                    </p>
                   {/if}
                 </div>
-              {/each}
+
+                <div class="relative">
+                  <pre
+                    class="bg-[var(--bg)] border border-[var(--border)] rounded-md
+                           p-4 text-[0.8125rem] font-mono text-[var(--text)]
+                           overflow-x-auto leading-relaxed"
+                  >{selectedTool.generateConfig(window.location.origin + "/mcp", createdKey)}</pre>
+                  <button
+                    class="absolute top-2 right-2 text-[0.6875rem] font-semibold
+                           uppercase tracking-wider text-[var(--accent)] px-2 py-1
+                           rounded bg-[var(--surface)] border border-[var(--border)]
+                           hover:bg-[var(--accent-subtle)] transition-colors"
+                    onclick={() =>
+                      navigator.clipboard.writeText(
+                        selectedTool!.generateConfig(
+                          window.location.origin + "/mcp",
+                          createdKey!
+                        )
+                      )
+                    }
+                  >
+                    Copy
+                  </button>
+                </div>
+
+                <div
+                  class="mt-4 text-[0.8125rem] text-[var(--success)] bg-[var(--success-bg)]
+                         px-3 py-2 rounded-md border-l-[3px] border-[var(--success)]"
+                >
+                  Save this configuration now. The API key won't be shown again.
+                </div>
+
+                <button
+                  class="mt-4 text-[0.8125rem] text-[var(--text-muted)]
+                         hover:text-[var(--text)] transition-colors"
+                  onclick={cancelConnect}
+                >
+                  Done
+                </button>
+              {:else}
+                <!-- Confirm connection -->
+                <h3 class="text-[0.9375rem] font-semibold text-[var(--text)] mb-1">
+                  Connect {selectedTool.name}
+                </h3>
+                <p class="text-[0.8125rem] text-[var(--text-muted)] mb-4">
+                  This will create a bot account for {selectedTool.name} that can manage issues, comments, and pages on your behalf.
+                </p>
+
+                {#if connectError}
+                  <div
+                    class="text-sm text-[var(--error)] bg-[var(--error-bg)]
+                           px-4 py-2 rounded-md border-l-[3px] border-[var(--error)] mb-4"
+                    role="alert"
+                  >
+                    {connectError}
+                  </div>
+                {/if}
+
+                <div class="flex gap-3">
+                  <button
+                    class="rounded-md bg-[var(--accent)] text-[var(--accent-text)]
+                           text-[0.875rem] font-medium px-4 py-2
+                           transition-all duration-200
+                           hover:bg-[var(--accent-hover)] active:scale-[0.98]
+                           disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={connecting}
+                    onclick={confirmConnect}
+                  >
+                    {connecting ? "Connecting..." : "Connect"}
+                  </button>
+                  <button
+                    class="rounded-md text-[0.875rem] text-[var(--text-muted)]
+                           px-4 py-2 hover:bg-[var(--bg-subtle)] transition-colors"
+                    onclick={cancelConnect}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Tool grid -->
+          <div class="grid grid-cols-2 max-sm:grid-cols-1 gap-3 mb-6">
+            {#each TOOL_TEMPLATES as template (template.id)}
+              {@const connected = isToolConnected(template.id)}
+              <button
+                class="text-left p-4 rounded-md border transition-all duration-200
+                       {connected
+                  ? 'border-[var(--success)] bg-[var(--success-bg)]'
+                  : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] hover:shadow-sm'}
+                       disabled:opacity-50"
+                disabled={connected || !!selectedTool}
+                onclick={() => startConnect(template)}
+              >
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-[0.9375rem] font-medium text-[var(--text)]">
+                    {template.name}
+                  </span>
+                  {#if connected}
+                    <span
+                      class="text-[0.6875rem] font-semibold uppercase tracking-wide
+                             text-[var(--success)]"
+                    >
+                      Connected
+                    </span>
+                  {/if}
+                </div>
+                <span class="text-[0.8125rem] text-[var(--text-muted)]">
+                  {template.description}
+                </span>
+              </button>
+            {/each}
+          </div>
+
+          <!-- Active connections list -->
+          {#if bots.length > 0}
+            <div class="mt-8">
+              <h3
+                class="text-[0.8125rem] font-medium uppercase tracking-widest
+                       text-[var(--text-faint)] mb-3"
+              >
+                Active connections
+              </h3>
+              <div class="border border-[var(--border)] rounded-md overflow-hidden">
+                {#each bots as bot, i (bot.id)}
+                  <div
+                    class="flex items-center justify-between px-4 py-3
+                           bg-[var(--surface)] gap-4
+                           {i > 0 ? 'border-t border-[var(--border)]' : ''}"
+                    class:opacity-50={!bot.has_active_key}
+                  >
+                    <div class="flex flex-col gap-0.5 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[0.9375rem] font-medium text-[var(--text)] truncate">
+                          {bot.display_name}
+                        </span>
+                        <span class="text-[0.75rem] text-[var(--text-faint)]">
+                          {bot.username}
+                        </span>
+                      </div>
+                      <span class="text-[0.75rem] text-[var(--text-faint)] flex items-center gap-2">
+                        Connected {formatDate(bot.created_at)}
+                        {#if bot.has_active_key}
+                          <span
+                            class="text-[0.6875rem] font-semibold uppercase tracking-wide
+                                   text-[var(--success)] bg-[var(--success-bg)]
+                                   px-1.5 py-0.5 rounded"
+                          >
+                            Active
+                          </span>
+                        {:else}
+                          <span
+                            class="text-[0.6875rem] font-semibold uppercase tracking-wide
+                                   text-[var(--error)] bg-[var(--error-bg)]
+                                   px-1.5 py-0.5 rounded"
+                          >
+                            Disconnected
+                          </span>
+                        {/if}
+                      </span>
+                    </div>
+                    {#if bot.has_active_key}
+                      <button
+                        class="shrink-0 text-[0.8125rem] text-[var(--error)]
+                               px-2 py-1 rounded transition-colors
+                               hover:bg-[var(--error-bg)]
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={disconnectingId === bot.id}
+                        onclick={() => handleDisconnect(bot.id)}
+                      >
+                        {disconnectingId === bot.id ? "..." : "Disconnect"}
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
           {/if}
         </section>

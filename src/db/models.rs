@@ -271,6 +271,20 @@ pub struct Session {
     pub created_at: String,
 }
 
+// ── Bots (tool connections) ───────────────────────────────────
+
+/// A bot (connected tool) with its owner info and key status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bot {
+    pub id: i64,
+    pub username: String,
+    pub display_name: String,
+    pub owner_id: Option<i64>,
+    pub created_at: String,
+    /// Whether the bot has an active (non-revoked) API key.
+    pub has_active_key: bool,
+}
+
 // ── API Key (user-facing) ────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

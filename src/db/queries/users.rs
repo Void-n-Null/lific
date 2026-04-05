@@ -286,6 +286,104 @@ pub fn get_user_for_api_key(conn: &Connection, key_id: i64) -> Result<Option<Use
     }
 }
 
+// ── Bots (connected tools) ───────────────────────────────────
+
+/// Create a bot user owned by the given human user.
+/// Returns the bot user. API key creation is handled separately by the caller
+/// using `auth::create_api_key` + `assign_key_to_user`.
+pub fn create_bot_user(
+    conn: &Connection,
+    owner_id: i64,
+    bot_username: &str,
+    display_name: &str,
+) -> Result<crate::db::models::User, LificError> {
+    // Bot users get a random password (never used for login)
+    let random_pw: [u8; 32] = rand::random();
+    let random_pw_hex: String = random_pw.iter().map(|b| format!("{b:02x}")).collect();
+    let password_hash = hash_password(&random_pw_hex)?;
+
+    conn.execute(
+        "INSERT INTO users (username, email, password_hash, display_name, is_admin, is_bot, owner_id)
+         VALUES (?1, ?2, ?3, ?4, 0, 1, ?5)",
+        params![
+            bot_username,
+            format!("{bot_username}@bot.local"),
+            password_hash,
+            display_name,
+            owner_id,
+        ],
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::SqliteFailure(err, _)
+            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            LificError::BadRequest(format!(
+                "this tool is already connected (bot '{bot_username}' exists)"
+            ))
+        }
+        other => other.into(),
+    })?;
+
+    let bot_user_id = conn.last_insert_rowid();
+    get_user_by_id(conn, bot_user_id)
+}
+
+/// List all bots owned by a specific user.
+pub fn list_bots(
+    conn: &Connection,
+    owner_id: i64,
+) -> Result<Vec<crate::db::models::Bot>, LificError> {
+    let mut stmt = conn.prepare(
+        "SELECT u.id, u.username, u.display_name, u.owner_id, u.created_at,
+                EXISTS(SELECT 1 FROM api_keys k WHERE k.user_id = u.id AND k.revoked = 0) as has_key
+         FROM users u
+         WHERE u.is_bot = 1 AND u.owner_id = ?1
+         ORDER BY u.created_at DESC",
+    )?;
+    let rows = stmt.query_map(params![owner_id], |row| {
+        Ok(crate::db::models::Bot {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            display_name: row.get(2)?,
+            owner_id: row.get(3)?,
+            created_at: row.get(4)?,
+            has_active_key: row.get(5)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Disconnect a bot: revoke its API key(s). Only the owner or admin can do this.
+pub fn disconnect_bot(
+    conn: &Connection,
+    bot_id: i64,
+    requester_id: i64,
+    is_admin: bool,
+) -> Result<(), LificError> {
+    // Verify ownership
+    let owner_id: Option<i64> = conn
+        .query_row(
+            "SELECT owner_id FROM users WHERE id = ?1 AND is_bot = 1",
+            params![bot_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| LificError::NotFound("bot not found".into()))?;
+
+    if owner_id != Some(requester_id) && !is_admin {
+        return Err(LificError::BadRequest(
+            "you can only disconnect your own bots".into(),
+        ));
+    }
+
+    // Revoke all API keys for this bot
+    conn.execute(
+        "UPDATE api_keys SET revoked = 1 WHERE user_id = ?1 AND revoked = 0",
+        params![bot_id],
+    )?;
+
+    Ok(())
+}
+
 /// List API keys belonging to a specific user.
 pub fn list_user_keys(
     conn: &Connection,

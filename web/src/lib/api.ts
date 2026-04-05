@@ -117,3 +117,121 @@ export async function revokeKey(id: number) {
     method: "DELETE",
   });
 }
+
+// ── Bot (connected tool) management ─────────────────────────
+
+export interface Bot {
+  id: number;
+  username: string;
+  display_name: string;
+  owner_id: number | null;
+  created_at: string;
+  has_active_key: boolean;
+}
+
+export interface CreateBotResponse {
+  bot: { id: number; username: string; display_name: string };
+  key: string;
+  tool: string;
+}
+
+export async function listBots() {
+  return request<Bot[]>("/auth/bots");
+}
+
+export async function createBot(tool: string) {
+  return request<CreateBotResponse>("/auth/bots", {
+    method: "POST",
+    body: JSON.stringify({ tool }),
+  });
+}
+
+export async function disconnectBot(id: number) {
+  return request<{ disconnected: boolean }>(`/auth/bots/${id}/disconnect`, {
+    method: "POST",
+  });
+}
+
+// ── Tool config templates ───────────────────────────────────
+
+export interface ToolTemplate {
+  id: string;
+  name: string;
+  description: string;
+  configPath: string;
+  configNote?: string;
+  generateConfig: (url: string, key: string) => string;
+}
+
+const MCP_URL = window.location.origin + "/mcp";
+
+export const TOOL_TEMPLATES: ToolTemplate[] = [
+  {
+    id: "opencode",
+    name: "OpenCode",
+    description: "Anomaly's open-source agentic coding CLI",
+    configPath: "~/.config/opencode/opencode.json",
+    configNote: "Add to the \"mcp\" section of your config",
+    generateConfig: (_url, key) =>
+      JSON.stringify(
+        {
+          lific: {
+            type: "remote",
+            url: MCP_URL,
+            headers: { Authorization: `Bearer ${key}` },
+          },
+        },
+        null,
+        2
+      ),
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    description: "AI-first code editor by Anysphere",
+    configPath: ".cursor/mcp.json (project) or ~/.cursor/mcp.json (global)",
+    configNote: "Add to the \"mcpServers\" section",
+    generateConfig: (_url, key) =>
+      JSON.stringify(
+        {
+          lific: {
+            url: MCP_URL,
+            headers: { Authorization: `Bearer ${key}` },
+          },
+        },
+        null,
+        2
+      ),
+  },
+  {
+    id: "claude",
+    name: "Claude Desktop",
+    description: "Anthropic's desktop client for Claude",
+    configPath:
+      "~/.config/Claude/claude_desktop_config.json (Linux) or ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)",
+    configNote:
+      "Requires mcp-remote (npm). Add to the \"mcpServers\" section. Restart Claude Desktop after editing.",
+    generateConfig: (_url, key) =>
+      JSON.stringify(
+        {
+          lific: {
+            command: "npx",
+            args: ["-y", "mcp-remote", MCP_URL],
+            env: { AUTHORIZATION: `Bearer ${key}` },
+          },
+        },
+        null,
+        2
+      ),
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    description: "OpenAI's CLI coding agent",
+    configPath: "~/.codex/config.toml",
+    configNote:
+      'Add to config.toml under [mcp_servers]. Set the env var LIFIC_API_KEY to the key below.',
+    generateConfig: (_url, key) =>
+      `[mcp_servers.lific]\ntransport.type = "http"\ntransport.url = "${MCP_URL}"\ntransport.bearer_token_env_var = "LIFIC_API_KEY"\n\n# Set this environment variable:\n# export LIFIC_API_KEY="${key}"`,
+  },
+];

@@ -21,6 +21,12 @@ pub fn router(db: DbPool) -> Router {
             get(list_keys).post(create_key),
         )
         .route("/api/auth/keys/{id}", delete(revoke_key))
+        // Connected tools (bots)
+        .route(
+            "/api/auth/bots",
+            get(list_bots).post(create_bot),
+        )
+        .route("/api/auth/bots/{id}/disconnect", post(disconnect_bot))
         // Comments
         .route(
             "/api/issues/{issue_id}/comments",
@@ -307,6 +313,84 @@ async fn revoke_key(
     queries::users::revoke_user_key(&conn, id, user.id, user.is_admin)?;
 
     Ok(Json(serde_json::json!({"revoked": true})))
+}
+
+// ── Bot (connected tool) endpoints ───────────────────────────
+
+async fn list_bots(
+    State(db): State<DbPool>,
+    Extension(auth_user): Extension<Option<AuthUser>>,
+) -> Result<Json<Vec<Bot>>, LificError> {
+    let user = auth_user.ok_or_else(|| {
+        LificError::BadRequest("authentication required".into())
+    })?;
+
+    with_read(&db, |conn| queries::users::list_bots(conn, user.id)).map(Json)
+}
+
+#[derive(serde::Deserialize)]
+struct CreateBotRequest {
+    /// Tool identifier (e.g. "opencode", "cursor", "claude", "codex")
+    tool: String,
+}
+
+async fn create_bot(
+    State(db): State<DbPool>,
+    Extension(auth_user): Extension<Option<AuthUser>>,
+    Extension(manager): Extension<std::sync::Arc<api_keys_simplified::ApiKeyManagerV0>>,
+    Json(input): Json<CreateBotRequest>,
+) -> Result<Json<serde_json::Value>, LificError> {
+    let user = auth_user.ok_or_else(|| {
+        LificError::BadRequest("authentication required".into())
+    })?;
+
+    let tool = input.tool.trim().to_lowercase();
+    let display_name = match tool.as_str() {
+        "opencode" => "OpenCode",
+        "cursor" => "Cursor",
+        "claude" => "Claude Desktop",
+        "codex" => "Codex",
+        _ => return Err(LificError::BadRequest(format!("unknown tool: {tool}"))),
+    };
+
+    let bot_username = format!("{tool}-{}", user.username);
+
+    // Create bot user
+    let bot_user = with_write(&db, |conn| {
+        queries::users::create_bot_user(conn, user.id, &bot_username, display_name)
+    })?;
+
+    // Create API key for the bot (uses the auth module's key generation)
+    let plaintext_key = crate::auth::create_api_key(&db, &manager, &bot_username)?;
+
+    // Assign the key to the bot user
+    let conn = db.write()?;
+    queries::users::assign_key_to_user(&conn, &bot_username, bot_user.id)?;
+
+    Ok(Json(serde_json::json!({
+        "bot": {
+            "id": bot_user.id,
+            "username": bot_user.username,
+            "display_name": bot_user.display_name,
+        },
+        "key": plaintext_key,
+        "tool": tool,
+    })))
+}
+
+async fn disconnect_bot(
+    State(db): State<DbPool>,
+    Path(id): Path<i64>,
+    Extension(auth_user): Extension<Option<AuthUser>>,
+) -> Result<Json<serde_json::Value>, LificError> {
+    let user = auth_user.ok_or_else(|| {
+        LificError::BadRequest("authentication required".into())
+    })?;
+
+    let conn = db.write()?;
+    queries::users::disconnect_bot(&conn, id, user.id, user.is_admin)?;
+
+    Ok(Json(serde_json::json!({"disconnected": true})))
 }
 
 // ── Comment endpoints ────────────────────────────────────────
