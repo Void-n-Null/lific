@@ -44,6 +44,12 @@ pub enum Command {
         #[command(subcommand)]
         action: KeyAction,
     },
+
+    /// Manage user accounts
+    User {
+        #[command(subcommand)]
+        action: UserAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -53,6 +59,21 @@ pub enum KeyAction {
         /// Name for this key (e.g. "claude", "opencode", "personal")
         #[arg(short, long)]
         name: String,
+
+        /// Username to assign this key to
+        #[arg(short, long)]
+        user: Option<String>,
+    },
+
+    /// Assign an existing API key to a user
+    Assign {
+        /// Name of the API key
+        #[arg(short, long)]
+        name: String,
+
+        /// Username to assign the key to
+        #[arg(short, long)]
+        user: String,
     },
 
     /// List all API keys (never shows the key itself)
@@ -71,6 +92,35 @@ pub enum KeyAction {
         #[arg(short, long)]
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum UserAction {
+    /// Create a new user account
+    Create {
+        /// Username (unique, case-insensitive)
+        #[arg(short, long)]
+        username: String,
+
+        /// Email address (unique)
+        #[arg(short, long)]
+        email: String,
+
+        /// Password (prompted interactively if omitted)
+        #[arg(short, long)]
+        password: Option<String>,
+
+        /// Grant admin privileges
+        #[arg(long)]
+        admin: bool,
+
+        /// Mark as a bot account
+        #[arg(long)]
+        bot: bool,
+    },
+
+    /// List all user accounts
+    List,
 }
 
 #[cfg(test)]
@@ -132,9 +182,46 @@ mod tests {
         let cli = Cli::try_parse_from(["lific", "key", "create", "--name", "test-key"]).unwrap();
         match cli.command {
             Command::Key {
-                action: KeyAction::Create { name },
-            } => assert_eq!(name, "test-key"),
+                action: KeyAction::Create { name, user },
+            } => {
+                assert_eq!(name, "test-key");
+                assert!(user.is_none());
+            }
             _ => panic!("expected Key Create"),
+        }
+    }
+
+    #[test]
+    fn parse_key_create_with_user() {
+        let cli = Cli::try_parse_from([
+            "lific", "key", "create", "--name", "my-key", "--user", "blake",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Key {
+                action: KeyAction::Create { name, user },
+            } => {
+                assert_eq!(name, "my-key");
+                assert_eq!(user, Some("blake".into()));
+            }
+            _ => panic!("expected Key Create"),
+        }
+    }
+
+    #[test]
+    fn parse_key_assign() {
+        let cli = Cli::try_parse_from([
+            "lific", "key", "assign", "--name", "opencode", "--user", "blake",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Key {
+                action: KeyAction::Assign { name, user },
+            } => {
+                assert_eq!(name, "opencode");
+                assert_eq!(user, "blake");
+            }
+            _ => panic!("expected Key Assign"),
         }
     }
 
@@ -147,6 +234,53 @@ mod tests {
             } => assert_eq!(name, "old"),
             _ => panic!("expected Key Revoke"),
         }
+    }
+
+    #[test]
+    fn parse_user_create() {
+        let cli = Cli::try_parse_from([
+            "lific",
+            "user",
+            "create",
+            "--username",
+            "blake",
+            "--email",
+            "b@test.com",
+            "--password",
+            "secret123",
+            "--admin",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::User {
+                action:
+                    UserAction::Create {
+                        username,
+                        email,
+                        password,
+                        admin,
+                        bot,
+                    },
+            } => {
+                assert_eq!(username, "blake");
+                assert_eq!(email, "b@test.com");
+                assert_eq!(password, Some("secret123".into()));
+                assert!(admin);
+                assert!(!bot);
+            }
+            _ => panic!("expected User Create"),
+        }
+    }
+
+    #[test]
+    fn parse_user_list() {
+        let cli = Cli::try_parse_from(["lific", "user", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::User {
+                action: UserAction::List,
+            }
+        ));
     }
 
     #[test]

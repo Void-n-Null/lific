@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use axum::{body::Body, extract::Request, middleware, response::IntoResponse, routing::any};
 use clap::Parser;
-use cli::{Cli, Command, KeyAction};
+use cli::{Cli, Command, KeyAction, UserAction};
 use config::Config;
 use rmcp::{
     ServiceExt,
@@ -53,10 +53,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auth::create_key_manager().map_err(|e| format!("key manager init failed: {e}"))?;
 
             match action {
-                KeyAction::Create { name } => {
+                KeyAction::Create { name, user } => {
                     let key = auth::create_api_key(&pool, &manager, &name)?;
-                    println!();
-                    println!("  API Key created: {name}");
+
+                    // If --user was provided, assign the key to that user
+                    if let Some(ref username) = user {
+                        let conn = pool.read()?;
+                        let u = db::queries::users::get_user_by_username(&conn, username)?;
+                        drop(conn);
+                        let conn = pool.write()?;
+                        db::queries::users::assign_key_to_user(&conn, &name, u.id)?;
+                        println!();
+                        println!("  API Key created: {name} (assigned to {username})");
+                    } else {
+                        println!();
+                        println!("  API Key created: {name}");
+                    }
                     println!();
                     println!("  {key}");
                     println!();
@@ -93,6 +105,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!();
                     println!("  Save this key now. It will never be shown again.");
                     println!();
+                }
+                KeyAction::Assign { name, user } => {
+                    let conn = pool.read()?;
+                    let u = db::queries::users::get_user_by_username(&conn, &user)?;
+                    drop(conn);
+                    let conn = pool.write()?;
+                    db::queries::users::assign_key_to_user(&conn, &name, u.id)?;
+                    println!("Assigned key '{name}' to user '{user}'");
+                }
+            }
+            return Ok(());
+        }
+
+        Command::User { action } => {
+            let pool = db::open(&cfg.database.path)?;
+
+            match action {
+                UserAction::Create {
+                    username,
+                    email,
+                    password,
+                    admin,
+                    bot,
+                } => {
+                    // Prompt for password if not provided
+                    let pw = match password {
+                        Some(p) => p,
+                        None => {
+                            eprint!("Password: ");
+                            let mut buf = String::new();
+                            std::io::stdin().read_line(&mut buf)?;
+                            buf.trim().to_string()
+                        }
+                    };
+
+                    let conn = pool.write()?;
+                    let user = db::queries::users::create_user(
+                        &conn,
+                        &db::models::CreateUser {
+                            username: username.clone(),
+                            email: email.clone(),
+                            password: pw,
+                            display_name: None,
+                            is_admin: admin,
+                            is_bot: bot,
+                        },
+                    )?;
+
+                    let role = if user.is_admin { " (admin)" } else { "" };
+                    println!("User created: {}{role}", user.username);
+                    println!("  email: {}", user.email);
+                    println!("  display_name: {}", user.display_name);
+                }
+                UserAction::List => {
+                    let conn = pool.read()?;
+                    let users = db::queries::users::list_users(&conn)?;
+
+                    if users.is_empty() {
+                        println!("No users.");
+                    } else {
+                        println!("{} user(s):", users.len());
+                        for u in &users {
+                            let flags = match (u.is_admin, u.is_bot) {
+                                (true, true) => " [admin, bot]",
+                                (true, false) => " [admin]",
+                                (false, true) => " [bot]",
+                                (false, false) => "",
+                            };
+                            println!(
+                                "  {} | {} | {}{} | created {}",
+                                u.id, u.username, u.email, flags, u.created_at
+                            );
+                        }
+                    }
                 }
             }
             return Ok(());
