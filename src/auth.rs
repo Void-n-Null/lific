@@ -250,11 +250,13 @@ pub async fn require_api_key(
     };
 
     if keys.is_empty() {
-        warn!("no API keys configured, allowing unauthenticated access");
-        request
-            .extensions_mut()
-            .insert(None::<crate::db::models::AuthUser>);
-        return next.run(request).await;
+        warn!("no API keys configured — rejecting request");
+        return (
+            StatusCode::UNAUTHORIZED,
+            [("WWW-Authenticate", www_auth.as_str())],
+            "No API keys configured. Create one with: lific key create --name <name>",
+        )
+            .into_response();
     }
 
     for key in &keys {
