@@ -174,19 +174,25 @@ async fn auth_logout(
 }
 
 async fn auth_me(
+    State(db): State<DbPool>,
     Extension(auth_user): Extension<Option<AuthUser>>,
 ) -> Result<Json<serde_json::Value>, LificError> {
-    match auth_user {
-        Some(user) => Ok(Json(serde_json::json!({
-            "id": user.id,
-            "username": user.username,
-            "display_name": user.display_name,
-            "is_admin": user.is_admin,
-        }))),
-        None => Err(LificError::BadRequest(
-            "no user associated with this token".into(),
-        )),
-    }
+    let user = auth_user.ok_or_else(|| {
+        LificError::BadRequest("no user associated with this token".into())
+    })?;
+
+    // Fetch full user from DB to get all fields (email, etc.)
+    let full = with_read(&db, |conn| {
+        queries::users::get_user_by_id(conn, user.id)
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "id": full.id,
+        "username": full.username,
+        "email": full.email,
+        "display_name": full.display_name,
+        "is_admin": full.is_admin,
+    })))
 }
 
 // ── Key management endpoints ─────────────────────────────────
