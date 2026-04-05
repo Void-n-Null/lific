@@ -3,6 +3,7 @@ mod pages;
 mod projects;
 mod resources;
 mod search;
+pub(crate) mod users;
 
 /// Unescape literal \n and \t sequences that come through JSON transport.
 pub(crate) fn unescape_text(s: &str) -> String {
@@ -15,3 +16,4 @@ pub use pages::*;
 pub use projects::*;
 pub use resources::*;
 pub use search::*;
+pub use users::*;
