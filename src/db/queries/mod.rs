@@ -16,4 +16,5 @@ pub use pages::*;
 pub use projects::*;
 pub use resources::*;
 pub use search::*;
-pub use users::*;
+// users module is accessed via queries::users:: directly (not wildcard re-exported)
+// to keep the namespace clean — user functions are only used by auth/CLI code.
