@@ -848,13 +848,34 @@ impl LificMcp {
     }
 
     #[tool(
-        description = "Add a comment to an issue. The author is determined by the authenticated user. If no user is associated with the current API key, a system user is used."
+        description = "Add a comment to an issue. The author is the user who owns the API key authenticating this MCP session."
     )]
     fn add_comment(&self, Parameters(input): Parameters<AddCommentInput>) -> String {
         let issue_id = match self.read(|conn| queries::resolve_identifier(conn, &input.identifier))
         {
             Ok(id) => id,
             Err(e) => return format!("Error: {e}"),
+        };
+
+        // Resolve the authenticated user from the task-local set by the HTTP handler.
+        // Falls back to first admin/user for stdio MCP or test contexts.
+        let user_id = match super::current_auth_user() {
+            Some(u) => u.id,
+            None => match self.read(|conn| {
+                queries::users::list_users(conn).map(|users| {
+                    users
+                        .iter()
+                        .find(|u| u.is_admin)
+                        .or(users.first())
+                        .map(|u| u.id)
+                })
+            }) {
+                Ok(Some(id)) => id,
+                _ => {
+                    return "Error: no users exist. Create a user first with `lific user create`."
+                        .into()
+                }
+            },
         };
 
         // For MCP, we need a user_id. Look for the first admin user, or first user.

@@ -324,7 +324,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .route(
                     "/mcp",
                     any(move |request: Request<Body>| async move {
-                        mcp_service.handle(request).await.into_response()
+                        // Extract the authenticated user (set by auth middleware)
+                        // and make it available to MCP tools via task-local storage.
+                        let auth_user = request
+                            .extensions()
+                            .get::<Option<db::models::AuthUser>>()
+                            .cloned()
+                            .flatten();
+
+                        mcp::MCP_AUTH_USER
+                            .scope(auth_user, async move {
+                                mcp_service.handle(request).await.into_response()
+                            })
+                            .await
                     }),
                 )
                 .layer(axum::Extension(login_limiter))
