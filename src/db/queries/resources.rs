@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 use crate::db::models::*;
 use crate::error::LificError;
@@ -6,7 +6,20 @@ use crate::error::LificError;
 use super::unescape_text;
 
 /// Look up the project_id for a module, label, or folder by its id.
+///
+/// The `table` parameter is validated against a whitelist to prevent SQL injection —
+/// only "modules", "labels", and "folders" are accepted.
 pub fn get_resource_project_id(conn: &Connection, table: &str, id: i64) -> Result<i64, LificError> {
+    let table = match table {
+        "modules" => "modules",
+        "labels" => "labels",
+        "folders" => "folders",
+        _ => {
+            return Err(LificError::BadRequest(format!(
+                "invalid resource table: {table}"
+            )))
+        }
+    };
     let sql = format!("SELECT project_id FROM {table} WHERE id = ?1");
     conn.query_row(&sql, params![id], |row| row.get(0))
         .map_err(|e| match e {
