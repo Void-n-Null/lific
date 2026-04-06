@@ -1,0 +1,73 @@
+Lific Source Available License v1.0
+
+Copyright (c) 2025-present Blake Werlinger
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, merge, and distribute the Software, subject to the following
+conditions:
+
+
+1. Attribution
+
+   All copies or substantial portions of the Software, whether modified or
+   unmodified, must include this license text and the above copyright notice.
+
+
+2. Share Modifications
+
+   If you modify the Software and distribute those modifications — whether as
+   source code, compiled binaries, or by making the modified Software available
+   over a network as a service — you must make the complete source code of your
+   modifications publicly available under the terms of this license.
+
+   "Modifications" means changes to the Software's own source files. Software
+   that merely uses the Software's API, embeds it as a dependency, or
+   communicates with it over a network does not constitute a modification and
+   is not subject to this requirement.
+
+
+3. No Competing Service
+
+   You may not provide the Software, or any modified version of it, to third
+   parties as a hosted or managed service that competes with the Software.
+
+   You may run the Software for your own internal use, for your organization's
+   internal use, or as a component within a larger product that provides
+   substantially different functionality.
+
+
+4. Trademark
+
+   This license does not grant permission to use the trade names, trademarks,
+   service marks, or product names of the licensor, including but not limited
+   to the "Lific" name and the Lific snake logo, except as required for
+   reasonable and customary attribution as described in Section 1.
+
+   Forks and derivative works must use a different name and branding.
+
+
+5. Patent Grant
+
+   Each contributor to the Software hereby grants you a perpetual, worldwide,
+   non-exclusive, no-charge, royalty-free, irrevocable patent license to make,
+   have made, use, import, and otherwise transfer the Software, where such
+   license applies only to those patent claims licensable by such contributor
+   that are necessarily infringed by their contribution(s) alone or by
+   combination of their contribution(s) with the Software.
+
+   If you institute patent litigation against any entity alleging that the
+   Software constitutes patent infringement, then any patent licenses granted
+   to you under this license for the Software shall terminate as of the date
+   such litigation is filed.
+
+
+6. No Warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
