@@ -100,13 +100,31 @@ Everything uses human-readable identifiers. `project="APP"`, not `project_id=7`.
 
 `list_issues(project="APP", workable=true)` returns only issues where all blockers are resolved. One call to answer "what can I actually start right now?" instead of manually tracing dependency chains.
 
-## Data model
+## What's in, what's coming
 
-Projects contain issues, modules, labels, pages, and folders. Issues have status (`backlog`, `todo`, `active`, `done`, `cancelled`), priority (`urgent`, `high`, `medium`, `low`, `none`), and optional module/label assignments. Issues link to each other with `blocks`, `relates_to`, and `duplicate` relations.
+**Shipping now:**
+- Projects, issues, labels, modules
+- Issue relations (blocks, relates_to, duplicate)
+- Markdown pages organized in recursive folders
+- Comments on issues
+- Web UI with inline editing, drag-and-drop, dark/light theme
+- Full-text search across everything
+- Board view (status/priority/module grouping)
+- User accounts with bot identities per connected tool
+- OAuth 2.1 for external clients
+- Automatic SQLite backups
 
-Pages are markdown documents organized in folders, with identifiers like `APP-DOC-1`.
+**Planned:**
+- Milestones with changelog generation
+- Git-aware issue references (parse commit messages for identifiers)
+- Activity log per issue
+- File attachments on issues and pages
+- Webhooks on issue changes
+- VS Code extension
+- Real-time updates via WebSocket
 
-That's it. No sprints, no story points, no custom fields, no workflows. If you need those, this isn't for you.
+**Not planned:**
+Sprints, story points, custom fields, workflow automations. If you need those, this isn't for you.
 
 ## Backups
 
