@@ -105,7 +105,8 @@
              bg-[var(--surface)] select-none overflow-y-auto"
     >
       <!-- Brand -->
-      <div class="px-4 py-3 border-b border-[var(--border)]">
+      <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[var(--border)]">
+        <img src="/logo.webp" alt="" width="24" height="24" />
         <span class="font-display text-lg tracking-tight text-[var(--text)]">
           Lific
         </span>
