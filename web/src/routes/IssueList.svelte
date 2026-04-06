@@ -260,24 +260,28 @@
     }
   });
 
-  // Scroll focused row into view, accounting for sticky headers and container edges
+  // Scroll focused row into view — only when driven by keyboard
+  let scrollOnFocus = false;
+
   $effect(() => {
-    if (focusedIndex < 0 || !listEl) return;
+    if (focusedIndex < 0 || !listEl || !scrollOnFocus) {
+      scrollOnFocus = false;
+      return;
+    }
+    scrollOnFocus = false;
     const row = listEl.querySelector(`[data-issue-index="${focusedIndex}"]`) as HTMLElement | null;
     if (!row) return;
 
-    // Use requestAnimationFrame so the DOM has settled after any reorder
     requestAnimationFrame(() => {
       const listRect = listEl!.getBoundingClientRect();
       const rowRect = row.getBoundingClientRect();
 
-      // Find the sticky header height (if grouped view is active)
       const stickyHeader = listEl!.querySelector(".sticky") as HTMLElement | null;
       const headerHeight = stickyHeader ? stickyHeader.offsetHeight : 0;
 
       const visibleTop = listRect.top + headerHeight;
       const visibleBottom = listRect.bottom;
-      const pad = 4; // breathing room
+      const pad = 4;
 
       if (rowRect.top < visibleTop + pad) {
         listEl!.scrollTop -= (visibleTop + pad - rowRect.top);
@@ -352,12 +356,14 @@
       case "j":
         e.preventDefault();
         markKeyboardActive();
+        scrollOnFocus = true;
         focusedIndex = Math.min(focusedIndex + 1, flatIssues.length - 1);
         break;
       case "ArrowUp":
       case "k":
         e.preventDefault();
         markKeyboardActive();
+        scrollOnFocus = true;
         focusedIndex = Math.max(focusedIndex - 1, 0);
         break;
       case "Enter":
