@@ -80,6 +80,18 @@
 
   $effect(() => {
     const id = issueIdentifier;
+    // Reset all editing state when switching issues
+    editingTitle = false;
+    editingDescription = false;
+    preEditHeight = null;
+    menuOpen = false;
+    confirmingDelete = false;
+    statusOpen = false;
+    priorityOpen = false;
+    moduleOpen = false;
+    labelsOpen = false;
+    commentDraft = "";
+    lastSaved = null;
     loadIssue(id);
   });
 
@@ -345,7 +357,7 @@
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
-      <div class="max-w-[960px] mx-auto flex gap-0 min-h-full">
+      <div class="max-w-[1120px] mx-auto flex gap-0 min-h-full">
         <!-- Main column -->
         <div class="flex-1 min-w-0 px-8 py-6">
           <!-- Title -->

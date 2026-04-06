@@ -280,7 +280,7 @@
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
-      <div class="max-w-[720px] mx-auto px-8 py-8">
+      <div class="px-10 py-8">
         <!-- Title -->
         {#if editingTitle}
           <!-- svelte-ignore a11y_autofocus -->
