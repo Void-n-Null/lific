@@ -1,8 +1,8 @@
 use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 use crate::db::models::*;
 use crate::error::LificError;
@@ -44,6 +44,11 @@ pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User, LificE
     if input.password.len() < 8 {
         return Err(LificError::BadRequest(
             "password must be at least 8 characters".into(),
+        ));
+    }
+    if input.password.len() > 1024 {
+        return Err(LificError::BadRequest(
+            "password must be 1024 characters or fewer".into(),
         ));
     }
 
@@ -126,6 +131,12 @@ pub fn get_user_by_email(conn: &Connection, email: &str) -> Result<User, LificEr
 /// Look up a user by username or email and verify their password.
 /// Returns the user on success, or an error on wrong credentials.
 pub fn authenticate(conn: &Connection, identity: &str, password: &str) -> Result<User, LificError> {
+    // Reject oversized passwords early to prevent Argon2 CPU DoS
+    if password.len() > 1024 {
+        return Err(LificError::BadRequest(
+            "invalid username/email or password".into(),
+        ));
+    }
     // Try username first, then email
     let user = get_user_by_username(conn, identity)
         .or_else(|_| get_user_by_email(conn, identity))
@@ -637,6 +648,27 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("8 characters"));
+    }
+
+    #[test]
+    fn oversized_password_rejected() {
+        let pool = test_db();
+        let conn = pool.write().unwrap();
+
+        let long_pw = "a".repeat(1025);
+        let result = create_user(
+            &conn,
+            &CreateUser {
+                username: "test".into(),
+                email: "test@example.com".into(),
+                password: long_pw,
+                display_name: None,
+                is_admin: false,
+                is_bot: false,
+            },
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("1024"));
     }
 
     #[test]
