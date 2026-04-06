@@ -90,6 +90,15 @@ fn run_backup(pool: &DbPool, db_path: &Path, backup_dir: &Path, retain: usize) {
                 let _ = std::fs::remove_file(&backup_path);
                 return;
             }
+            // Restrict permissions to owner-only (0600) since backups contain the full DB
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o600);
+                if let Err(e) = std::fs::set_permissions(&backup_path, perms) {
+                    warn!(error = %e, "failed to set backup file permissions");
+                }
+            }
             let size = std::fs::metadata(&backup_path)
                 .map(|m| m.len())
                 .unwrap_or(0);
