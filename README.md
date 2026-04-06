@@ -1,12 +1,5 @@
 <p align="center">
-  <img src="IssyLogo.png" alt="Lific" width="120">
-</p>
-
-<h3 align="center">Lific</h3>
-
-<p align="center">
-  Issue tracking built for AI-driven development.<br>
-  Single binary. SQLite. MCP schema under ~2,500 tokens.
+  <img src="LificHero.png" alt="Lific — Issue tracking built for AI-driven development" width="800">
 </p>
 
 <p align="center">
