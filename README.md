@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Void-n-Null/lific/actions/workflows/ci.yml"><img src="https://github.com/Void-n-Null/lific/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/Void-n-Null/lific/releases"><img src="https://img.shields.io/github/v/release/Void-n-Null/lific" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Void-n-Null/lific" alt="License"></a>
+  <a href="https://github.com/VoidNullable/lific/actions/workflows/ci.yml"><img src="https://github.com/VoidNullable/lific/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/VoidNullable/lific/releases"><img src="https://img.shields.io/github/v/release/VoidNullable/lific" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/VoidNullable/lific" alt="License"></a>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@ Lific's full MCP schema fits in ~2,500 tokens. It uses human-readable identifier
 cargo install lific
 ```
 
-Or grab a binary from the [releases page](https://github.com/Void-n-Null/lific/releases).
+Or grab a binary from the [releases page](https://github.com/VoidNullable/lific/releases).
 
 ## Quickstart
 
@@ -161,7 +161,7 @@ CLI flags (`--db`, `--port`, `--host`) override config values.
 ## Building from source
 
 ```bash
-git clone https://github.com/Void-n-Null/lific
+git clone https://github.com/VoidNullable/lific
 cd lific
 cd web && bun install && bun run build && cd ..
 cargo build --release
