@@ -338,17 +338,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "/mcp",
                     any(move |request: Request<Body>| async move {
                         // Extract the authenticated user (set by auth middleware)
-                        // and store it globally for MCP tools to read.
+                        // and store it for MCP tools to read. Serialized to prevent
+                        // concurrent requests from overwriting each other's identity.
                         let auth_user = request
                             .extensions()
                             .get::<Option<db::models::AuthUser>>()
                             .cloned()
                             .flatten();
 
-                        mcp::set_request_user(auth_user);
-                        let response = mcp_service.handle(request).await.into_response();
-                        mcp::set_request_user(None); // clean up
-                        response
+                        mcp::with_request_user(auth_user, || async {
+                            mcp_service.handle(request).await.into_response()
+                        })
+                        .await
                     }),
                 )
                 .layer(axum::Extension(login_limiter))

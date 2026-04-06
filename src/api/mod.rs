@@ -154,14 +154,17 @@ where
 }
 
 /// Check if the authenticated user can manage a project (update settings, manage structure).
-/// Returns Ok(()) if: no user context (OAuth/legacy key), user is admin, or user is project lead.
+/// Returns Ok(()) if: user is admin, or user is project lead.
+/// Default-deny: returns Forbidden when auth_user is None (OAuth tokens, legacy keys).
 fn require_project_lead(
     db: &DbPool,
     auth_user: &Option<AuthUser>,
     project_id: i64,
 ) -> Result<(), LificError> {
     let Some(user) = auth_user else {
-        return Ok(()); // No user context (OAuth/legacy key) — allow
+        return Err(LificError::Forbidden(
+            "only the project lead or an admin can do this".into(),
+        ));
     };
     if user.is_admin {
         return Ok(());
@@ -176,15 +179,12 @@ fn require_project_lead(
 }
 
 /// Check if the authenticated user is an admin.
-/// Returns Ok(()) if: no user context (OAuth/legacy key) or user is admin.
+/// Default-deny: returns Forbidden when auth_user is None (OAuth tokens, legacy keys).
 fn require_admin(auth_user: &Option<AuthUser>) -> Result<(), LificError> {
-    let Some(user) = auth_user else {
-        return Ok(()); // No user context — allow
-    };
-    if user.is_admin {
-        return Ok(());
+    match auth_user {
+        Some(user) if user.is_admin => Ok(()),
+        _ => Err(LificError::Forbidden("only an admin can do this".into())),
     }
-    Err(LificError::Forbidden("only an admin can do this".into()))
 }
 
 // ── Cross-cutting endpoints ──────────────────────────────────

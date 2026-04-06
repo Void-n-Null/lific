@@ -13,22 +13,41 @@ use rmcp::{
 use crate::db::DbPool;
 use crate::db::models::AuthUser;
 
-/// Global storage for the most recent MCP request's authenticated user.
-/// This is a workaround for rmcp spawning tool calls on different tasks
-/// where tokio::task_local doesn't propagate.
-///
-/// Safe for single-server use: the mutex serializes access and the value
-/// is set immediately before mcp_service.handle() and read during tool execution.
+/// Serialization lock for MCP request handling.
+/// Ensures only one MCP request processes at a time, preventing the race
+/// condition where concurrent requests could overwrite each other's user identity.
+/// Acceptable throughput cost for a local-first, single-user tool.
+static MCP_HANDLER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Per-request user identity storage.
+/// Protected from races by MCP_HANDLER_LOCK ensuring serial access.
+/// Uses unwrap_or_else to recover from poison (e.g. if a handler panics).
 static MCP_REQUEST_USER: Mutex<Option<AuthUser>> = Mutex::new(None);
 
-/// Set the authenticated user for the current MCP request.
-pub fn set_request_user(user: Option<AuthUser>) {
-    *MCP_REQUEST_USER.lock().unwrap() = user;
+/// Acquire the MCP handler lock, set the user, run the provided future,
+/// then clean up. Guarantees no identity confusion between concurrent requests.
+pub async fn with_request_user<F, Fut, R>(user: Option<AuthUser>, f: F) -> R
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let _guard = MCP_HANDLER_LOCK.lock().await;
+    *MCP_REQUEST_USER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = user;
+    let result = f().await;
+    *MCP_REQUEST_USER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    result
 }
 
 /// Get the authenticated user for the current MCP request, if any.
 pub(crate) fn current_auth_user() -> Option<AuthUser> {
-    MCP_REQUEST_USER.lock().unwrap().clone()
+    MCP_REQUEST_USER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 #[derive(Clone)]

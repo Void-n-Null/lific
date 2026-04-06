@@ -323,7 +323,6 @@ async fn authorize_approve(
 struct TokenRequest {
     grant_type: String,
     code: Option<String>,
-    #[allow(dead_code)]
     redirect_uri: Option<String>,
     client_id: Option<String>,
     code_verifier: Option<String>,
@@ -373,13 +372,13 @@ async fn token_exchange(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
     };
 
-    let code_row: Result<(String, String, String, i64, String), _> = conn.query_row(
-        "SELECT client_id, code_challenge, code_challenge_method, used, scope FROM oauth_codes WHERE code = ?1 AND expires_at > datetime('now')",
+    let code_row: Result<(String, String, String, String, i64, String), _> = conn.query_row(
+        "SELECT client_id, redirect_uri, code_challenge, code_challenge_method, used, scope FROM oauth_codes WHERE code = ?1 AND expires_at > datetime('now')",
         params![code],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     );
 
-    let (stored_client_id, code_challenge, challenge_method, used, scope) = match code_row {
+    let (stored_client_id, stored_redirect_uri, code_challenge, challenge_method, used, scope) = match code_row {
         Ok(row) => row,
         Err(_) => {
             return (
@@ -409,6 +408,26 @@ async fn token_exchange(
             .into_response();
     }
 
+    // Validate redirect_uri matches the one used during authorization (OAuth 2.1 Section 4.1.3)
+    match &req.redirect_uri {
+        Some(uri) if *uri != stored_redirect_uri => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid_grant", "error_description": "redirect_uri mismatch"})),
+            )
+                .into_response();
+        }
+        None => {
+            // redirect_uri is required when it was included in the authorization request
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid_request", "error_description": "missing redirect_uri"})),
+            )
+                .into_response();
+        }
+        _ => {} // matches — continue
+    }
+
     // Validate PKCE
     if !validate_pkce(code_verifier, &code_challenge, &challenge_method) {
         return (
@@ -424,14 +443,15 @@ async fn token_exchange(
         params![code],
     );
 
-    // Generate access token
+    // Generate access token — store SHA-256 hash, return raw token only once
     let access_token = format!("lific_at_{}", uuid_v4());
+    let token_hash = hex_encode(&Sha256::digest(access_token.as_bytes()));
     let expires_in: u64 = 3600 * 24 * 30; // 30 days
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in as i64);
 
     let _ = conn.execute(
         "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, ?2, ?3, ?4)",
-        params![access_token, stored_client_id, expires_at.to_rfc3339(), scope],
+        params![token_hash, stored_client_id, expires_at.to_rfc3339(), scope],
     );
 
     info!(client_id = %stored_client_id, scope = %scope, "OAuth token issued");
@@ -460,10 +480,12 @@ async fn revoke_token(
 ) -> Response {
     // RFC 7009 says the server MUST respond with 200 even if the token
     // is invalid, already revoked, or unrecognized — to prevent token scanning.
+    // Hash the token before lookup since we store SHA-256 hashes.
+    let token_hash = hex_encode(&Sha256::digest(req.token.as_bytes()));
     if let Ok(conn) = state.db.write() {
         let _ = conn.execute(
             "UPDATE oauth_tokens SET revoked = 1 WHERE access_token = ?1",
-            params![req.token],
+            params![token_hash],
         );
     }
 
@@ -473,15 +495,23 @@ async fn revoke_token(
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 fn validate_pkce(verifier: &str, challenge: &str, method: &str) -> bool {
+    // OAuth 2.1 requires S256 only. Reject empty challenges/verifiers.
+    if verifier.is_empty() || challenge.is_empty() {
+        return false;
+    }
     match method {
         "S256" => {
             let hash = Sha256::digest(verifier.as_bytes());
             let computed = base64_url_encode(&hash);
             computed == challenge
         }
-        "plain" => verifier == challenge,
-        _ => false,
+        _ => false, // Only S256 is accepted per OAuth 2.1
     }
+}
+
+/// Encode bytes as lowercase hex string.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn base64_url_encode(bytes: &[u8]) -> String {
@@ -517,15 +547,17 @@ pub fn validate_oauth_token(db: &DbPool, token: &str) -> bool {
 }
 
 /// Validate an OAuth token and return its granted scope.
+/// Tokens are stored as SHA-256 hashes; the incoming raw token is hashed before lookup.
 pub fn validate_oauth_token_with_scope(db: &DbPool, token: &str) -> Option<String> {
     if !token.starts_with("lific_at_") {
         return None;
     }
+    let token_hash = hex_encode(&Sha256::digest(token.as_bytes()));
     let conn = db.read().ok()?;
     conn.query_row(
         "SELECT scope FROM oauth_tokens
          WHERE access_token = ?1 AND revoked = 0 AND expires_at > datetime('now')",
-        params![token],
+        params![token_hash],
         |row| row.get(0),
     )
     .ok()
@@ -794,8 +826,9 @@ mod tests {
     async fn revoke_token_invalidates_access() {
         let (app, db) = test_oauth_app();
 
-        // Manually insert a token to revoke
+        // Manually insert a token to revoke (stored as SHA-256 hash)
         let token = "lific_at_test-revoke-token";
+        let token_hash = hex_encode(&Sha256::digest(token.as_bytes()));
         let expires = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
         {
             let conn = db.write().unwrap();
@@ -806,7 +839,7 @@ mod tests {
             ).unwrap();
             conn.execute(
                 "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, 'test-client', ?2, 'mcp')",
-                params![token, expires],
+                params![token_hash, expires],
             ).unwrap();
         }
 
@@ -888,6 +921,7 @@ mod tests {
         let (_, db) = test_oauth_app();
 
         let token = "lific_at_scope-test-token";
+        let token_hash = hex_encode(&Sha256::digest(token.as_bytes()));
         let expires = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
         {
             let conn = db.write().unwrap();
@@ -897,7 +931,7 @@ mod tests {
             ).unwrap();
             conn.execute(
                 "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, 'scope-client', ?2, 'mcp')",
-                params![token, expires],
+                params![token_hash, expires],
             ).unwrap();
         }
 
@@ -910,6 +944,7 @@ mod tests {
         let (_, db) = test_oauth_app();
 
         let token = "lific_at_revoked-scope-test";
+        let token_hash = hex_encode(&Sha256::digest(token.as_bytes()));
         let expires = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
         {
             let conn = db.write().unwrap();
@@ -919,7 +954,7 @@ mod tests {
             ).unwrap();
             conn.execute(
                 "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope, revoked) VALUES (?1, 'rev-client', ?2, 'mcp', 1)",
-                params![token, expires],
+                params![token_hash, expires],
             ).unwrap();
         }
 

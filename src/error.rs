@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LificError {
@@ -23,11 +24,24 @@ pub enum LificError {
 impl IntoResponse for LificError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            LificError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            LificError::Database(e) => {
+                // Log the real error server-side, return generic message to client
+                error!(error = %e, "database error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+            }
             LificError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             LificError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             LificError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            LificError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            LificError::Internal(msg) => {
+                error!(error = %msg, "internal error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+            }
         };
 
         let body = json!({ "error": message });
