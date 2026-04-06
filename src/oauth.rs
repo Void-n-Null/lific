@@ -39,10 +39,12 @@ pub fn router(state: OAuthState) -> Router {
             get(authorize_page).post(authorize_approve),
         )
         .route("/oauth/token", post(token_exchange))
+        .route("/oauth/revoke", post(revoke_token))
         // Claude.ai strips /oauth/ prefix (known bug anthropics/claude-ai-mcp#82)
         .route("/register", post(register_client))
         .route("/authorize", get(authorize_page).post(authorize_approve))
         .route("/token", post(token_exchange))
+        .route("/revoke", post(revoke_token))
         .with_state(state)
 }
 
@@ -63,10 +65,11 @@ async fn authorization_server_metadata(State(state): State<OAuthState>) -> Json<
         "authorization_endpoint": format!("{}/oauth/authorize", state.issuer),
         "token_endpoint": format!("{}/oauth/token", state.issuer),
         "registration_endpoint": format!("{}/oauth/register", state.issuer),
+        "revocation_endpoint": format!("{}/oauth/revoke", state.issuer),
         "scopes_supported": ["mcp"],
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "grant_types_supported": ["authorization_code"],
         "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
         "code_challenge_methods_supported": ["S256"]
     }))
@@ -120,7 +123,7 @@ async fn register_client(
             "client_name": client_name,
             "redirect_uris": req.redirect_uris,
             "token_endpoint_auth_method": req.token_endpoint_auth_method.unwrap_or_else(|| "none".into()),
-            "grant_types": req.grant_types.unwrap_or_else(|| vec!["authorization_code".into(), "refresh_token".into()]),
+            "grant_types": req.grant_types.unwrap_or_else(|| vec!["authorization_code".into()]),
             "response_types": req.response_types.unwrap_or_else(|| vec!["code".into()])
         })),
     )
@@ -203,29 +206,55 @@ async fn authorize_approve(
     axum::Form(form): axum::Form<ApproveForm>,
 ) -> Response {
     // Require authentication — the person approving must be identified.
-    // Check for a valid session token or API key in the Authorization header
-    // or in a cookie. For the HTML form flow, we also accept a form-submitted token.
-    let has_auth = headers
+    // Extract a session token from either the Authorization header or a cookie,
+    // then validate it against the database to ensure it's a real, non-expired session.
+    let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .map(|v| v.starts_with("Bearer "))
-        .unwrap_or(false);
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            // For the browser form flow, extract the token from the lific_token cookie
+            headers
+                .get("cookie")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|cookies| {
+                    cookies.split(';').find_map(|c| {
+                        let c = c.trim();
+                        c.strip_prefix("lific_token=").map(|v| v.trim().to_string())
+                    })
+                })
+        });
 
-    if !has_auth {
-        // For the browser form flow, check if there's a cookie with a session token
-        let has_cookie = headers
-            .get("cookie")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.contains("lific_token="))
-            .unwrap_or(false);
+    let Some(token) = token else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Html("<h1>Authentication required</h1><p>You must be signed in to approve OAuth access. <a href=\"/#/login\">Sign in</a></p>".to_string()),
+        )
+            .into_response();
+    };
 
-        if !has_cookie {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Html("<h1>Authentication required</h1><p>You must be signed in to approve OAuth access. <a href=\"/#/login\">Sign in</a></p>".to_string()),
-            )
-                .into_response();
-        }
+    // Actually validate the token against the database.
+    // OAuth routes bypass the auth middleware, so we must validate here.
+    let is_valid = if token.starts_with("lific_sess_") {
+        let conn = match oauth.db.write() {
+            Ok(c) => c,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
+        };
+        crate::db::queries::users::validate_session(&conn, &token).is_ok()
+    } else if token.starts_with("lific_at_") {
+        // OAuth tokens can also approve (valid authenticated identity)
+        validate_oauth_token(&oauth.db, &token)
+    } else {
+        false
+    };
+
+    if !is_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Html("<h1>Invalid session</h1><p>Your session has expired or is invalid. <a href=\"/#/login\">Sign in again</a></p>".to_string()),
+        )
+            .into_response();
     }
 
     // Validate the redirect_uri against the client's registered URIs
@@ -256,11 +285,12 @@ async fn authorize_approve(
 
     let code = uuid_v4();
     let expires = chrono::Utc::now() + chrono::Duration::minutes(10);
+    let scope = form.scope.as_deref().unwrap_or("mcp");
 
     if let Ok(conn) = oauth.db.write() {
         let _ = conn.execute(
-            "INSERT INTO oauth_codes (code, client_id, redirect_uri, code_challenge, code_challenge_method, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO oauth_codes (code, client_id, redirect_uri, code_challenge, code_challenge_method, expires_at, scope)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 code,
                 form.client_id,
@@ -268,6 +298,7 @@ async fn authorize_approve(
                 form.code_challenge.unwrap_or_default(),
                 form.code_challenge_method.unwrap_or_else(|| "S256".into()),
                 expires.to_rfc3339(),
+                scope,
             ],
         );
     }
@@ -305,6 +336,7 @@ struct TokenResponse {
     access_token: String,
     token_type: String,
     expires_in: u64,
+    scope: String,
 }
 
 async fn token_exchange(
@@ -341,13 +373,13 @@ async fn token_exchange(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
     };
 
-    let code_row: Result<(String, String, String, i64), _> = conn.query_row(
-        "SELECT client_id, code_challenge, code_challenge_method, used FROM oauth_codes WHERE code = ?1 AND expires_at > datetime('now')",
+    let code_row: Result<(String, String, String, i64, String), _> = conn.query_row(
+        "SELECT client_id, code_challenge, code_challenge_method, used, scope FROM oauth_codes WHERE code = ?1 AND expires_at > datetime('now')",
         params![code],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     );
 
-    let (stored_client_id, code_challenge, challenge_method, used) = match code_row {
+    let (stored_client_id, code_challenge, challenge_method, used, scope) = match code_row {
         Ok(row) => row,
         Err(_) => {
             return (
@@ -398,18 +430,44 @@ async fn token_exchange(
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in as i64);
 
     let _ = conn.execute(
-        "INSERT INTO oauth_tokens (access_token, client_id, expires_at) VALUES (?1, ?2, ?3)",
-        params![access_token, stored_client_id, expires_at.to_rfc3339()],
+        "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, ?2, ?3, ?4)",
+        params![access_token, stored_client_id, expires_at.to_rfc3339(), scope],
     );
 
-    info!(client_id = %stored_client_id, "OAuth token issued");
+    info!(client_id = %stored_client_id, scope = %scope, "OAuth token issued");
 
     Json(TokenResponse {
         access_token,
         token_type: "Bearer".into(),
         expires_in,
+        scope,
     })
     .into_response()
+}
+
+// ── Token Revocation (RFC 7009) ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RevokeRequest {
+    token: String,
+    #[allow(dead_code)]
+    token_type_hint: Option<String>,
+}
+
+async fn revoke_token(
+    State(state): State<OAuthState>,
+    axum::Form(req): axum::Form<RevokeRequest>,
+) -> Response {
+    // RFC 7009 says the server MUST respond with 200 even if the token
+    // is invalid, already revoked, or unrecognized — to prevent token scanning.
+    if let Ok(conn) = state.db.write() {
+        let _ = conn.execute(
+            "UPDATE oauth_tokens SET revoked = 1 WHERE access_token = ?1",
+            params![req.token],
+        );
+    }
+
+    StatusCode::OK.into_response()
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -455,20 +513,415 @@ fn html_escape(s: &str) -> String {
 
 /// Check if a bearer token is a valid OAuth access token.
 pub fn validate_oauth_token(db: &DbPool, token: &str) -> bool {
+    validate_oauth_token_with_scope(db, token).is_some()
+}
+
+/// Validate an OAuth token and return its granted scope.
+pub fn validate_oauth_token_with_scope(db: &DbPool, token: &str) -> Option<String> {
     if !token.starts_with("lific_at_") {
-        return false;
+        return None;
     }
-    let conn = match db.read() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let valid: bool = conn
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM oauth_tokens
-             WHERE access_token = ?1 AND revoked = 0 AND expires_at > datetime('now')",
-            params![token],
-            |row| row.get(0),
+    let conn = db.read().ok()?;
+    conn.query_row(
+        "SELECT scope FROM oauth_tokens
+         WHERE access_token = ?1 AND revoked = 0 AND expires_at > datetime('now')",
+        params![token],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_oauth_app() -> (Router, DbPool) {
+        let db = crate::db::open_memory().expect("test db");
+        let state = OAuthState {
+            db: db.clone(),
+            issuer: "https://example.com".into(),
+        };
+        (router(state), db)
+    }
+
+    /// Register a client, returning the client_id.
+    async fn register_client_helper(app: &Router, redirect_uri: &str) -> String {
+        let body = serde_json::json!({
+            "redirect_uris": [redirect_uri],
+            "client_name": "Test Client"
+        });
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        val["client_id"].as_str().unwrap().to_string()
+    }
+
+    /// Create a user session for OAuth tests.
+    fn create_test_session(db: &DbPool) -> String {
+        let conn = db.write().unwrap();
+        let user = crate::db::queries::users::create_user(
+            &conn,
+            &crate::db::models::CreateUser {
+                username: "oauthtest".into(),
+                email: "oauth@test.com".into(),
+                password: "testpassword1".into(),
+                display_name: None,
+                is_admin: false,
+                is_bot: false,
+            },
         )
-        .unwrap_or(false);
-    valid
+        .unwrap();
+        let session = crate::db::queries::users::create_session(&conn, user.id, None).unwrap();
+        session.token
+    }
+
+    // ── LIF-48: authorize_approve validates tokens ───────────
+
+    #[tokio::test]
+    async fn authorize_rejects_missing_auth() {
+        let (app, _db) = test_oauth_app();
+        let client_id = register_client_helper(&app, "http://localhost/callback").await;
+
+        let body = format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
+            client_id,
+            urlencoding::encode("http://localhost/callback"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_garbage_bearer_token() {
+        let (app, _db) = test_oauth_app();
+        let client_id = register_client_helper(&app, "http://localhost/callback").await;
+
+        let body = format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
+            client_id,
+            urlencoding::encode("http://localhost/callback"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", "Bearer lific_sess_fake_garbage_token")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_fake_cookie_token() {
+        let (app, _db) = test_oauth_app();
+        let client_id = register_client_helper(&app, "http://localhost/callback").await;
+
+        let body = format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
+            client_id,
+            urlencoding::encode("http://localhost/callback"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("cookie", "lific_token=lific_sess_fake_garbage_token")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn authorize_accepts_valid_session_token() {
+        let (app, db) = test_oauth_app();
+        let session_token = create_test_session(&db);
+        let client_id = register_client_helper(&app, "http://localhost/callback").await;
+
+        let body = format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
+            client_id,
+            urlencoding::encode("http://localhost/callback"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", format!("Bearer {session_token}"))
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Should redirect (303 or 302), not reject
+        assert!(
+            resp.status().is_redirection() || resp.status() == StatusCode::SEE_OTHER,
+            "expected redirect, got {}",
+            resp.status()
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_accepts_valid_cookie_session() {
+        let (app, db) = test_oauth_app();
+        let session_token = create_test_session(&db);
+        let client_id = register_client_helper(&app, "http://localhost/callback").await;
+
+        let body = format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
+            client_id,
+            urlencoding::encode("http://localhost/callback"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/authorize")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("cookie", format!("lific_token={session_token}"))
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_redirection(),
+            "expected redirect, got {}",
+            resp.status()
+        );
+    }
+
+    // ── LIF-49: metadata does not advertise refresh_token ────
+
+    #[tokio::test]
+    async fn metadata_does_not_advertise_refresh_token() {
+        let (app, _) = test_oauth_app();
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-authorization-server")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        let grants = val["grant_types_supported"].as_array().unwrap();
+        assert!(
+            !grants.iter().any(|g| g == "refresh_token"),
+            "metadata should not advertise refresh_token grant"
+        );
+        assert!(grants.iter().any(|g| g == "authorization_code"));
+    }
+
+    #[tokio::test]
+    async fn register_defaults_do_not_include_refresh_token() {
+        let (app, _) = test_oauth_app();
+        let body = serde_json::json!({
+            "redirect_uris": ["http://localhost/callback"],
+            "client_name": "Test"
+        });
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/register")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        let grants = val["grant_types"].as_array().unwrap();
+        assert!(
+            !grants.iter().any(|g| g == "refresh_token"),
+            "client registration should not default to refresh_token"
+        );
+    }
+
+    // ── LIF-50: token revocation ─────────────────────────────
+
+    #[tokio::test]
+    async fn revoke_token_invalidates_access() {
+        let (app, db) = test_oauth_app();
+
+        // Manually insert a token to revoke
+        let token = "lific_at_test-revoke-token";
+        let expires = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+        {
+            let conn = db.write().unwrap();
+            // Need a client first
+            conn.execute(
+                "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ('test-client', 'Test', '[\"http://localhost\"]')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, 'test-client', ?2, 'mcp')",
+                params![token, expires],
+            ).unwrap();
+        }
+
+        // Token should be valid
+        assert!(validate_oauth_token(&db, token));
+
+        // Revoke it
+        let body = format!("token={token}");
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/revoke")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Token should now be invalid
+        assert!(!validate_oauth_token(&db, token));
+    }
+
+    #[tokio::test]
+    async fn revoke_unknown_token_returns_200() {
+        let (app, _) = test_oauth_app();
+
+        // RFC 7009: always return 200, even for unknown tokens
+        let body = "token=lific_at_nonexistent";
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/revoke")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // ── LIF-51: metadata advertises revocation endpoint ──────
+
+    #[tokio::test]
+    async fn metadata_includes_revocation_endpoint() {
+        let (app, _) = test_oauth_app();
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-authorization-server")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert!(val["revocation_endpoint"].as_str().is_some());
+        assert!(val["revocation_endpoint"]
+            .as_str()
+            .unwrap()
+            .ends_with("/oauth/revoke"));
+    }
+
+    // ── LIF-51: scope is stored on tokens ────────────────────
+
+    #[tokio::test]
+    async fn validate_oauth_token_returns_scope() {
+        let (_, db) = test_oauth_app();
+
+        let token = "lific_at_scope-test-token";
+        let expires = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        {
+            let conn = db.write().unwrap();
+            conn.execute(
+                "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ('scope-client', 'Test', '[\"http://localhost\"]')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, 'scope-client', ?2, 'mcp')",
+                params![token, expires],
+            ).unwrap();
+        }
+
+        let scope = validate_oauth_token_with_scope(&db, token);
+        assert_eq!(scope, Some("mcp".to_string()));
+    }
+
+    #[tokio::test]
+    async fn revoked_token_has_no_scope() {
+        let (_, db) = test_oauth_app();
+
+        let token = "lific_at_revoked-scope-test";
+        let expires = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        {
+            let conn = db.write().unwrap();
+            conn.execute(
+                "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ('rev-client', 'Test', '[\"http://localhost\"]')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope, revoked) VALUES (?1, 'rev-client', ?2, 'mcp', 1)",
+                params![token, expires],
+            ).unwrap();
+        }
+
+        assert_eq!(validate_oauth_token_with_scope(&db, token), None);
+        assert!(!validate_oauth_token(&db, token));
+    }
 }

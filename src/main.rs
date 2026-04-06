@@ -417,6 +417,7 @@ async fn auth_middleware_wrapper(
         || path == "/register"
         || path == "/authorize"
         || path == "/token"
+        || path == "/revoke"
     {
         return next.run(request).await;
     }

@@ -39,6 +39,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "project lead",
         include_str!("../../migrations/008_project_lead.sql"),
     ),
+    (
+        9,
+        "oauth scope",
+        include_str!("../../migrations/009_oauth_scope.sql"),
+    ),
 ];
 
 /// Ensure the migrations table exists and apply any pending migrations.
