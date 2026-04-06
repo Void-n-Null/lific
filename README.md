@@ -1,6 +1,4 @@
-<p><img src="IssyLogo.png" width="80" alt="Lific"></p>
-
-# Lific
+# <img src="IssyLogo.png" width="40" alt="" style="vertical-align: middle;"> Lific
 
 A lightweight issue tracker designed for AI-driven development. 
 
