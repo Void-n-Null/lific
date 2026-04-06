@@ -80,7 +80,7 @@
   }
 </script>
 
-<div class="max-w-[560px] mx-auto px-6 py-12 md:py-16">
+<div class="max-w-[560px] mx-auto px-6 pt-12 md:pt-16">
   <!-- Name -->
   <div class="mb-8">
     <label

@@ -5,6 +5,7 @@
     listModules,
     listLabels,
     updateIssue,
+    createIssue,
     type Issue,
     type Project,
     type Module,
@@ -181,18 +182,6 @@
     return groups;
   });
 
-  // Quick status update
-  async function cycleStatus(issue: Issue, e: Event) {
-    e.stopPropagation();
-    const idx = STATUSES.indexOf(issue.status);
-    const next = STATUSES[(idx + 1) % STATUSES.length];
-    const res = await updateIssue(issue.id, { status: next });
-    if (res.ok) {
-      issue.status = next;
-      issues = [...issues]; // trigger reactivity
-    }
-  }
-
   function hasActiveFilters(): boolean {
     return !!(filterStatus || filterPriority || filterLabel || filterModule);
   }
@@ -203,6 +192,235 @@
     filterLabel = "";
     filterModule = "";
     searchQuery = "";
+  }
+
+  // ── Keyboard navigation ──────────────────────────────
+  let focusedIndex = $state(-1);
+  let inlineCreateActive = $state(false);
+  let inlineCreateStatus = $state("backlog");
+  let inlineCreateStatusOpen = $state(false);
+  let inlineCreateTitle = $state("");
+  let inlineCreateSaving = $state(false);
+  let inlineCreateTitleEl = $state<HTMLInputElement | null>(null);
+  let listEl = $state<HTMLDivElement | null>(null);
+
+  // Status dropdown on existing issue rows
+  let statusDropdownId = $state<number | null>(null);
+
+  // Status picker keyboard index (shared by inline create and row dropdowns)
+  let inlineCreateStatusIdx = $state(0);
+
+  // Mouse suppression after keyboard use
+  let keyboardActiveUntil = 0;
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+  const KEYBOARD_COOLDOWN = 750; // ms
+  const MOUSE_MOVE_THRESHOLD = 8; // px
+
+  function markKeyboardActive() {
+    keyboardActiveUntil = Date.now() + KEYBOARD_COOLDOWN;
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  }
+
+  function shouldAcceptMouse(e: MouseEvent): boolean {
+    if (Date.now() < keyboardActiveUntil) {
+      // Only accept if the mouse has moved meaningfully
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      if (Math.abs(dx) + Math.abs(dy) < MOUSE_MOVE_THRESHOLD) return false;
+    }
+    return true;
+  }
+
+  // Flat ordered list for keyboard indexing (matches render order)
+  let flatIssues = $derived.by(() => {
+    if (groupedByStatus && !filterStatus) {
+      const flat: Issue[] = [];
+      for (const status of STATUSES) {
+        const group = groupedByStatus[status];
+        if (group) flat.push(...group);
+      }
+      return flat;
+    }
+    return filteredIssues;
+  });
+
+  // Reset focus when issues change — but not from a status cycle
+  let skipFocusReset = false;
+  $effect(() => {
+    flatIssues;
+    if (skipFocusReset) {
+      skipFocusReset = false;
+    } else {
+      focusedIndex = -1;
+    }
+  });
+
+  // Scroll focused row into view, accounting for sticky headers and container edges
+  $effect(() => {
+    if (focusedIndex < 0 || !listEl) return;
+    const row = listEl.querySelector(`[data-issue-index="${focusedIndex}"]`) as HTMLElement | null;
+    if (!row) return;
+
+    // Use requestAnimationFrame so the DOM has settled after any reorder
+    requestAnimationFrame(() => {
+      const listRect = listEl!.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+
+      // Find the sticky header height (if grouped view is active)
+      const stickyHeader = listEl!.querySelector(".sticky") as HTMLElement | null;
+      const headerHeight = stickyHeader ? stickyHeader.offsetHeight : 0;
+
+      const visibleTop = listRect.top + headerHeight;
+      const visibleBottom = listRect.bottom;
+      const pad = 4; // breathing room
+
+      if (rowRect.top < visibleTop + pad) {
+        listEl!.scrollTop -= (visibleTop + pad - rowRect.top);
+      } else if (rowRect.bottom > visibleBottom - pad) {
+        listEl!.scrollTop += (rowRect.bottom - visibleBottom + pad);
+      }
+    });
+  });
+
+  function isInputFocused(): boolean {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement).isContentEditable;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    // Status picker keyboard navigation (inline create or row dropdown)
+    if (inlineCreateStatusOpen || statusDropdownId !== null) {
+      if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        inlineCreateStatusIdx = Math.min(inlineCreateStatusIdx + 1, STATUSES.length - 1);
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        inlineCreateStatusIdx = Math.max(inlineCreateStatusIdx - 1, 0);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const picked = STATUSES[inlineCreateStatusIdx];
+        if (inlineCreateStatusOpen) {
+          // Inline create: pick status, move to title
+          inlineCreateStatus = picked;
+          inlineCreateStatusOpen = false;
+          requestAnimationFrame(() => inlineCreateTitleEl?.focus());
+        } else if (statusDropdownId !== null) {
+          // Existing issue row: set status
+          const target = issues.find((i) => i.id === statusDropdownId);
+          if (target && picked !== target.status) {
+            skipFocusReset = true;
+            updateIssue(target.id, { status: picked }).then((res) => {
+              if (res.ok) {
+                target.status = picked;
+                issues = [...issues];
+              }
+            });
+          }
+          statusDropdownId = null;
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (inlineCreateStatusOpen) {
+          inlineCreateStatusOpen = false;
+          requestAnimationFrame(() => inlineCreateTitleEl?.focus());
+        } else {
+          statusDropdownId = null;
+        }
+        return;
+      }
+      return; // Swallow all other keys while picker is open
+    }
+
+    // Don't intercept when typing in inputs
+    if (isInputFocused()) return;
+
+    switch (e.key) {
+      case "ArrowDown":
+      case "j":
+        e.preventDefault();
+        markKeyboardActive();
+        focusedIndex = Math.min(focusedIndex + 1, flatIssues.length - 1);
+        break;
+      case "ArrowUp":
+      case "k":
+        e.preventDefault();
+        markKeyboardActive();
+        focusedIndex = Math.max(focusedIndex - 1, 0);
+        break;
+      case "Enter":
+        if (focusedIndex >= 0 && focusedIndex < flatIssues.length) {
+          e.preventDefault();
+          navigate(`/${projectIdentifier}/issues/${flatIssues[focusedIndex].identifier}`);
+        }
+        break;
+      case "c":
+        e.preventDefault();
+        inlineCreateActive = true;
+        inlineCreateStatus = "backlog";
+        inlineCreateStatusOpen = true;
+        inlineCreateStatusIdx = 0;
+        inlineCreateTitle = "";
+        break;
+      case "s":
+        if (focusedIndex >= 0 && focusedIndex < flatIssues.length) {
+          e.preventDefault();
+          const focusedIssue = flatIssues[focusedIndex];
+          const focusedId = focusedIssue.id;
+          const sIdx = STATUSES.indexOf(focusedIssue.status);
+          const nextStatus = STATUSES[(sIdx + 1) % STATUSES.length];
+          skipFocusReset = true;
+          updateIssue(focusedIssue.id, { status: nextStatus }).then((res) => {
+            if (res.ok) {
+              focusedIssue.status = nextStatus;
+              issues = [...issues];
+              // Re-find the issue in the new flat order and restore focus
+              const newIdx = flatIssues.findIndex((i) => i.id === focusedId);
+              if (newIdx >= 0) focusedIndex = newIdx;
+            }
+          });
+        }
+        break;
+      case "Escape":
+        if (statusDropdownId !== null) {
+          statusDropdownId = null;
+        } else if (inlineCreateActive) {
+          inlineCreateActive = false;
+          inlineCreateStatusOpen = false;
+          inlineCreateTitle = "";
+        } else {
+          focusedIndex = -1;
+        }
+        break;
+    }
+  }
+
+  async function submitInlineCreate() {
+    if (!project || !inlineCreateTitle.trim() || inlineCreateSaving) return;
+    inlineCreateSaving = true;
+    const res = await createIssue({
+      project_id: project.id,
+      title: inlineCreateTitle.trim(),
+      status: inlineCreateStatus,
+    });
+    inlineCreateSaving = false;
+    if (res.ok) {
+      inlineCreateActive = false;
+      inlineCreateTitle = "";
+      navigate(`/${projectIdentifier}/issues/${res.data.identifier}`);
+    }
   }
 
   function formatRelativeDate(iso: string): string {
@@ -220,6 +438,8 @@
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 </script>
+
+<svelte:window onkeydown={handleKeydown} onmousemove={handleMouseMove} onclick={() => { statusDropdownId = null; inlineCreateStatusOpen = false; }} />
 
 <div class="h-full flex flex-col">
   <!-- Toolbar -->
@@ -367,6 +587,25 @@
           Clear
         </button>
       {/if}
+
+      <!-- Separator -->
+      <div class="w-px h-4 bg-[var(--border)]"></div>
+
+      <!-- Keyboard hints -->
+      <div class="flex items-center gap-2.5 text-[0.75rem] text-[var(--text-faint)]">
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-subtle)] font-mono text-[0.6875rem] leading-none">C</kbd>
+          new
+        </span>
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-subtle)] font-mono text-[0.6875rem] leading-none">S</kbd>
+          status
+        </span>
+        <span class="flex items-center gap-1">
+          <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-subtle)] font-mono text-[0.6875rem] leading-none">&uarr;&darr;</kbd>
+          navigate
+        </span>
+      </div>
     </div>
 
     <!-- Spacer -->
@@ -401,8 +640,97 @@
     </div>
   </div>
 
+  <!-- Inline create row (sticky above scrollable list) -->
+  {#if inlineCreateActive}
+      <div
+        class="shrink-0 flex items-center gap-3 px-6 py-2.5
+               border-b border-[var(--border)] border-l-2 border-l-[var(--accent)]
+               bg-[var(--accent-subtle)]"
+      >
+        <!-- Status picker -->
+        <div class="relative shrink-0">
+          <button
+            class="size-4 flex items-center justify-center transition-colors
+                   hover:text-[var(--accent)]"
+            title="Set status"
+            onclick={(e) => { e.stopPropagation(); inlineCreateStatusOpen = !inlineCreateStatusOpen; }}
+          >
+            {@render statusIcon(inlineCreateStatus, 16)}
+          </button>
+          {#if inlineCreateStatusOpen}
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+            <div
+              class="absolute left-0 top-full mt-1.5 z-30 w-[160px]
+                     bg-[var(--surface)] border border-[var(--border)]
+                     rounded-lg shadow-lg py-1.5"
+              onclick={(e) => e.stopPropagation()}
+            >
+              {#each STATUSES as s, si}
+                <button
+                  class="w-full flex items-center gap-2 px-3 py-1.5 text-left
+                         text-[0.8125rem] transition-colors capitalize
+                         {si === inlineCreateStatusIdx
+                    ? 'text-[var(--accent)] bg-[var(--accent-subtle)] font-medium'
+                    : 'text-[var(--text)] hover:bg-[var(--bg-subtle)]'}"
+                  onclick={() => {
+                    inlineCreateStatus = s;
+                    inlineCreateStatusOpen = false;
+                    requestAnimationFrame(() => inlineCreateTitleEl?.focus());
+                  }}
+                  onmouseenter={() => { inlineCreateStatusIdx = si; }}
+                >
+                  {@render statusIcon(s, 14)}
+                  {s}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <span class="text-[0.8125rem] text-[var(--text-faint)] font-mono shrink-0 w-[72px]">
+          {projectIdentifier}-...
+        </span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          type="text"
+          bind:this={inlineCreateTitleEl}
+          bind:value={inlineCreateTitle}
+          class="flex-1 text-[0.875rem] bg-transparent text-[var(--text)]
+                 placeholder:text-[var(--text-faint)] outline-none border-none"
+          placeholder="Issue title..."
+          autofocus={!inlineCreateStatusOpen}
+          disabled={inlineCreateSaving}
+          onkeydown={(e) => {
+            if (e.key === "Enter" && inlineCreateTitle.trim()) {
+              e.preventDefault();
+              submitInlineCreate();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              inlineCreateActive = false;
+              inlineCreateStatusOpen = false;
+              inlineCreateTitle = "";
+            }
+          }}
+          onblur={() => {
+            // Small delay to allow clicking the status picker without closing
+            setTimeout(() => {
+              if (!inlineCreateTitle.trim() && !inlineCreateStatusOpen) {
+                inlineCreateActive = false;
+                inlineCreateTitle = "";
+              }
+            }, 150);
+          }}
+        />
+        {#if inlineCreateSaving}
+          <span class="text-[0.75rem] text-[var(--text-faint)]">Creating...</span>
+        {/if}
+      </div>
+  {/if}
+
   <!-- Issue list -->
-  <div class="flex-1 overflow-y-auto">
+  <div class="flex-1 overflow-y-auto" bind:this={listEl}>
     {#if loading}
       <div class="flex items-center justify-center py-20">
         <div
@@ -431,11 +759,13 @@
       </div>
     {:else if groupedByStatus && !filterStatus}
       <!-- Grouped view -->
-      {#each Object.entries(groupedByStatus) as [status, statusIssues] (status)}
+      {@const _groups = Object.entries(groupedByStatus)}
+      {#each _groups as [status, statusIssues], _gi (status)}
+        {@const groupOffset = _groups.slice(0, _gi).reduce((n, [, g]) => n + g.length, 0)}
         <div class="border-b border-[var(--border)] last:border-b-0">
           <div
             class="sticky top-0 z-10 flex items-center gap-2 px-6 py-2
-                   bg-[var(--bg)] border-b border-[var(--border)]"
+                   bg-[var(--surface)] border-b border-[var(--border)]"
           >
             <span class="inline-flex items-center gap-1.5">
               {@render statusIcon(status, 14)}
@@ -450,39 +780,89 @@
               {statusIssues.length}
             </span>
           </div>
-          {#each statusIssues as issue (issue.id)}
-            {@render issueRow(issue)}
+          {#each statusIssues as issue, si (issue.id)}
+            {@render issueRow(issue, groupOffset + si)}
           {/each}
         </div>
       {/each}
     {:else}
       <!-- Flat list -->
-      {#each filteredIssues as issue (issue.id)}
-        {@render issueRow(issue)}
+      {#each filteredIssues as issue, i (issue.id)}
+        {@render issueRow(issue, i)}
       {/each}
     {/if}
   </div>
 </div>
 
-{#snippet issueRow(issue: Issue)}
+{#snippet issueRow(issue: Issue, idx: number)}
+  {@const isFocused = idx === focusedIndex}
   <div
     class="w-full flex items-center gap-3 px-6 py-2.5 text-left
            border-b border-[var(--border)] last:border-b-0
-           hover:bg-[var(--bg-subtle)] transition-colors group cursor-pointer"
+           border-l-2 transition-colors group cursor-pointer
+           {isFocused
+      ? 'border-l-[var(--accent)] bg-[var(--accent-subtle)]'
+      : 'border-l-transparent hover:bg-[var(--bg-subtle)]'}"
+    data-issue-index={idx}
     role="button"
-    tabindex="0"
+    tabindex="-1"
     onclick={() => navigate(`/${projectIdentifier}/issues/${issue.identifier}`)}
-    onkeydown={(e) => { if (e.key === "Enter") navigate(`/${projectIdentifier}/issues/${issue.identifier}`); }}
+    onmouseenter={(e) => { if (shouldAcceptMouse(e)) focusedIndex = idx; }}
   >
-    <!-- Status indicator (clickable to cycle) -->
-    <button
-      class="size-4 shrink-0 transition-colors flex items-center justify-center
-             hover:text-[var(--accent)]"
-      title="Status: {issue.status} (click to cycle)"
-      onclick={(e) => cycleStatus(issue, e)}
-    >
-      {@render statusIcon(issue.status, 16)}
-    </button>
+    <!-- Status indicator (clickable to pick) -->
+    <div class="relative shrink-0">
+      <button
+        class="size-4 flex items-center justify-center transition-colors
+               hover:text-[var(--accent)]"
+        title="Status: {issue.status}"
+        onclick={(e) => {
+          e.stopPropagation();
+          if (statusDropdownId === issue.id) {
+            statusDropdownId = null;
+          } else {
+            statusDropdownId = issue.id;
+            inlineCreateStatusIdx = Math.max(0, STATUSES.indexOf(issue.status));
+          }
+        }}
+      >
+        {@render statusIcon(issue.status, 16)}
+      </button>
+      {#if statusDropdownId === issue.id}
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <div
+          class="absolute left-0 top-full mt-1.5 z-30 w-[160px]
+                 bg-[var(--surface)] border border-[var(--border)]
+                 rounded-lg shadow-lg py-1.5"
+          onclick={(e) => e.stopPropagation()}
+        >
+          {#each STATUSES as s, si}
+            <button
+              class="w-full flex items-center gap-2 px-3 py-1.5 text-left
+                     text-[0.8125rem] transition-colors capitalize
+                     {si === inlineCreateStatusIdx
+                ? 'text-[var(--accent)] bg-[var(--accent-subtle)] font-medium'
+                : 'text-[var(--text)] hover:bg-[var(--bg-subtle)]'}"
+              onclick={() => {
+                statusDropdownId = null;
+                if (s !== issue.status) {
+                  skipFocusReset = true;
+                  updateIssue(issue.id, { status: s }).then((res) => {
+                    if (res.ok) {
+                      issue.status = s;
+                      issues = [...issues];
+                    }
+                  });
+                }
+              }}
+              onmouseenter={() => { inlineCreateStatusIdx = si; }}
+            >
+              {@render statusIcon(s, 14)}
+              {s}
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
 
     <!-- Identifier -->
     <span

@@ -132,6 +132,33 @@
     if (cmtRes.ok) comments = cmtRes.data;
 
     loading = false;
+
+    // Auto-enter description edit mode if content is empty
+    if (editable && issue && !issue.description.trim()) {
+      requestAnimationFrame(() => startEditDescription());
+    }
+  }
+
+  // ── Keyboard shortcuts ──────────────────────────────
+  function handleKeydown(e: KeyboardEvent) {
+    // Ctrl+S / Cmd+S — save whatever is being edited
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      if (editingTitle) commitTitle();
+      if (editingDescription) commitDescription();
+      return;
+    }
+
+    if (e.key !== "Escape") return;
+    // Don't intercept Esc when editing or in an input
+    const el = document.activeElement;
+    if (el) {
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement).isContentEditable) return;
+    }
+    if (editingTitle || editingDescription || statusOpen || priorityOpen || moduleOpen || labelsOpen || menuOpen) return;
+    e.preventDefault();
+    navigate(`/${projectIdentifier}/issues`);
   }
 
   // Close all dropdowns on outside click
@@ -318,7 +345,7 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 {#if loading}
   <div class="h-full flex items-center justify-center">
