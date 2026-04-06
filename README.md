@@ -4,25 +4,19 @@
 
 <p align="center">
   <a href="https://github.com/VoidNullable/lific/actions/workflows/ci.yml"><img src="https://github.com/VoidNullable/lific/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/lific"><img src="https://img.shields.io/crates/v/lific" alt="crates.io"></a>
   <a href="https://github.com/VoidNullable/lific/releases"><img src="https://img.shields.io/github/v/release/VoidNullable/lific" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/VoidNullable/lific" alt="License"></a>
 </p>
 
 <p align="center">
   <strong>Lightweight issue tracking built for AI-driven development.</strong><br>
-  Clean Web UI. Single Binary. MCP built in.
+  Single binary. MCP built in. Clean web UI.
 </p>
 
 ---
 
 Lific's full MCP schema fits in ~2,500 tokens. It uses human-readable identifiers (`APP-42`, not UUIDs), runs as a single binary with an embedded SQLite database, and includes a web UI for when you want to look at things yourself.
-
-- **Issues** with status, priority, modules, labels, relations, and comments
-- **Pages** as markdown documents in recursive folders
-- **Web UI** with inline editing, drag-and-drop, dark/light theme
-- **MCP + REST API** for AI assistants and automation
-- **User accounts** with per-tool bot identities
-- **Automatic backups** with configurable retention
 
 ## Install
 
@@ -35,34 +29,25 @@ Or grab a binary from the [releases page](https://github.com/VoidNullable/lific/
 ## Quickstart
 
 ```bash
-lific init     # creates lific.toml
+lific init     # creates lific.toml + lific.db
 lific start    # starts on port 3456
 ```
 
-Open `http://localhost:3456`, create an account (first account is admin), and you're running.
+On first run, Lific generates an API key and prints it to the console. Save it — it won't be shown again. This key is used for MCP and API access.
 
-## Connecting your AI tools
+Open `http://localhost:3456` to use the web UI. The first account you create is the admin.
 
-Go to **Settings > Connected Tools** in the web UI. Pick your tool, click Connect, paste the generated config snippet. Supported out of the box:
+## Connecting AI tools
 
-- OpenCode
-- Cursor
-- Claude Code
-- Claude Desktop
-- Codex
+Point your MCP client at the server. Replace `your-api-key` with the key from first run (or create one with `lific key create --name my-key`).
 
-Each connection creates a bot identity tied to your account. Changes show up attributed to you, tagged with which tool made them.
-
-<details>
-<summary>Manual setup (headless / remote server)</summary>
-
-Point your MCP client at the `/mcp` endpoint:
+**Remote (network):**
 
 ```json
 {
   "lific": {
     "type": "remote",
-    "url": "https://your-server/mcp",
+    "url": "http://localhost:3456/mcp",
     "headers": {
       "Authorization": "Bearer your-api-key"
     }
@@ -70,7 +55,7 @@ Point your MCP client at the `/mcp` endpoint:
 }
 ```
 
-Or run locally via stdio (no network):
+**Local (stdio, no network):**
 
 ```json
 {
@@ -81,53 +66,48 @@ Or run locally via stdio (no network):
 }
 ```
 
+<details>
+<summary>Web UI setup (if you prefer clicking)</summary>
+
+Go to **Settings > Connected Tools** in the web UI. Pick your tool, click Connect, and paste the generated config snippet. Supported tools: OpenCode, Cursor, Claude Code, Claude Desktop, Codex.
+
+Each connection creates a bot identity tied to your account. Changes show up attributed to you, tagged with which tool made them.
+
 </details>
 
 ## MCP tools
 
-<details>
-<summary>Full tool list (~2,500 tokens of schema)</summary>
-
 | Tool | What it does |
 |------|-------------|
-| `list_resources` | Discover projects, modules, labels, folders, pages, issues |
 | `list_issues` | Filter by status, priority, module, label, or workable |
-| `get_issue` | Full issue details with relations and labels |
-| `create_issue` | Create with project, module, labels, priority |
-| `update_issue` | Partial updates by identifier |
+| `get_issue` | Full issue details with relations, labels, and comments |
+| `create_issue` / `update_issue` | Create or partially update by identifier |
 | `get_board` | Board view grouped by status, priority, or module |
 | `search` | Full-text search across issues and pages |
 | `link_issues` / `unlink_issues` | Dependency tracking (blocks, relates_to, duplicate) |
-| `get_page` / `create_page` / `update_page` | Markdown documents |
+| `get_page` / `create_page` / `update_page` | Markdown documents in folders |
 | `add_comment` / `list_comments` | Comments on issues |
+| `list_resources` | Discover projects, modules, labels, folders |
 | `manage_resource` | Create/update projects, modules, labels, folders |
 | `delete` | Delete anything by identifier |
 
 Everything uses human-readable identifiers: `project="APP"` not `project_id=7`.
 
-**Workable filter:** `list_issues(project="APP", workable=true)` returns only issues with all blockers resolved. One call to answer "what can I start right now?"
+**Workable filter:** `list_issues(project="APP", workable=true)` returns only issues with all blockers resolved — one call to answer "what can I work on right now?"
 
-</details>
+## Features
 
-## Roadmap
-
-- [x] Projects, issues, labels, modules, relations
-- [x] Markdown pages in recursive folders
-- [x] Comments on issues
-- [x] Web UI with inline editing and drag-and-drop
-- [x] Full-text search
-- [x] User accounts with bot identities
-- [x] OAuth 2.1
-- [x] Automatic SQLite backups
-- [ ] Milestones with changelog generation
-- [ ] Git-aware issue references (parse commits for identifiers)
-- [ ] Activity log per issue
-- [ ] File attachments
-- [ ] Webhooks
-- [ ] VS Code extension
-- [ ] Real-time updates via WebSocket
-
-Not planned: sprints, story points, custom fields, workflow automations.
+| Category | What you get |
+|----------|-------------|
+| **Issue tracking** | Status, priority, modules, labels, relations, comments, board view |
+| **Documentation** | Markdown pages in recursive folders |
+| **MCP interface** | 16 tools, ~2,500 token schema, human-readable identifiers |
+| **REST API** | Full CRUD for all resources, search, board view |
+| **Web UI** | Inline editing, drag-and-drop, dark/light theme |
+| **User accounts** | Individual auth, per-tool bot identities, project lead permissions |
+| **OAuth 2.1** | PKCE, dynamic client registration, token revocation |
+| **Backups** | Automatic SQLite snapshots with configurable retention |
+| **Single binary** | No runtime dependencies, embedded SQLite, ~15MB |
 
 ## Configuration
 
@@ -167,7 +147,7 @@ cd web && bun install && bun run build && cd ..
 cargo build --release
 ```
 
-Requires Rust 2024 edition. SQLite is bundled.
+Requires Rust 1.88+ (edition 2024). SQLite is bundled. The web frontend is optional — the binary works without it, you just won't have the UI.
 
 ## Contributing
 
@@ -175,4 +155,4 @@ Issues and PRs welcome. If you're planning something big, open an issue first so
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)

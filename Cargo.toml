@@ -7,6 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/VoidNullable/lific"
 keywords = ["issue-tracker", "project-management", "mcp", "sqlite", "local-first"]
 categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.88"
 include = [
     "src/**/*",
     "migrations/**/*",
