@@ -3,6 +3,11 @@
 </p>
 
 <p align="center">
+  <strong>Lightweight issue tracking built for AI-driven development.</strong><br>
+  Clean Web UI. Single Binary. MCP built in.
+</p>
+
+<p align="center">
   <a href="https://github.com/Void-n-Null/lific/actions/workflows/ci.yml"><img src="https://github.com/Void-n-Null/lific/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Void-n-Null/lific/releases"><img src="https://img.shields.io/github/v/release/Void-n-Null/lific" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Void-n-Null/lific" alt="License"></a>
