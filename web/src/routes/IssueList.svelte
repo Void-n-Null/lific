@@ -210,6 +210,18 @@
   // Status picker keyboard index (shared by inline create and row dropdowns)
   let inlineCreateStatusIdx = $state(0);
 
+  // Debounce: prevent key-repeat from spamming actions
+  let statusUpdating = false;
+  let lastKeyAction = 0;
+  const KEY_DEBOUNCE = 150; // ms — blocks repeat-fire for held keys
+
+  function canFireKey(): boolean {
+    const now = Date.now();
+    if (now - lastKeyAction < KEY_DEBOUNCE) return false;
+    lastKeyAction = now;
+    return true;
+  }
+
   // Mouse suppression after keyboard use
   let keyboardActiveUntil = 0;
   let lastMouseX = 0;
@@ -355,6 +367,7 @@
       case "ArrowDown":
       case "j":
         e.preventDefault();
+        if (!canFireKey()) break;
         markKeyboardActive();
         scrollOnFocus = true;
         focusedIndex = Math.min(focusedIndex + 1, flatIssues.length - 1);
@@ -362,6 +375,7 @@
       case "ArrowUp":
       case "k":
         e.preventDefault();
+        if (!canFireKey()) break;
         markKeyboardActive();
         scrollOnFocus = true;
         focusedIndex = Math.max(focusedIndex - 1, 0);
@@ -381,18 +395,19 @@
         inlineCreateTitle = "";
         break;
       case "s":
-        if (focusedIndex >= 0 && focusedIndex < flatIssues.length) {
+        if (focusedIndex >= 0 && focusedIndex < flatIssues.length && !statusUpdating && canFireKey()) {
           e.preventDefault();
           const focusedIssue = flatIssues[focusedIndex];
           const focusedId = focusedIssue.id;
           const sIdx = STATUSES.indexOf(focusedIssue.status);
           const nextStatus = STATUSES[(sIdx + 1) % STATUSES.length];
           skipFocusReset = true;
+          statusUpdating = true;
           updateIssue(focusedIssue.id, { status: nextStatus }).then((res) => {
+            statusUpdating = false;
             if (res.ok) {
               focusedIssue.status = nextStatus;
               issues = [...issues];
-              // Re-find the issue in the new flat order and restore focus
               const newIdx = flatIssues.findIndex((i) => i.id === focusedId);
               if (newIdx >= 0) {
                 scrollOnFocus = true;
