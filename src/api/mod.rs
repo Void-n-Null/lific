@@ -796,6 +796,16 @@ async fn get_board(
         )
     })?;
 
+    let module_names: std::collections::HashMap<i64, String> = if q.group_by == "module" {
+        with_read(&db, |conn| queries::list_modules(conn, project_id))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| (m.id, m.name))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let mut board: std::collections::BTreeMap<String, Vec<&Issue>> =
         std::collections::BTreeMap::new();
     for issue in &issues {
@@ -803,8 +813,8 @@ async fn get_board(
             "priority" => issue.priority.clone(),
             "module" => issue
                 .module_id
-                .map(|_| "has_module".to_string())
-                .unwrap_or("unassigned".to_string()),
+                .and_then(|m| module_names.get(&m).cloned())
+                .unwrap_or("unassigned".into()),
             _ => issue.status.clone(),
         };
         board.entry(key).or_default().push(issue);
@@ -1132,6 +1142,73 @@ mod tests {
         let board: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(board["todo"].as_array().unwrap().len(), 2);
         assert_eq!(board["active"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn board_groups_by_module_resolves_names() {
+        let db = crate::db::open_memory().expect("test db");
+        let app =
+            router(db.clone()).layer(Extension(crate::config::AuthConfig { allow_signup: true }));
+        let (project_id, _) = seed_project(&app).await;
+
+        // Create a module via direct DB access
+        let conn = db.read().unwrap();
+        queries::create_module(
+            &conn,
+            &crate::db::models::CreateModule {
+                project_id,
+                name: "Backend".into(),
+                description: String::new(),
+                status: "active".into(),
+            },
+        )
+        .unwrap();
+        let modules = queries::list_modules(&conn, project_id).unwrap();
+        let module_id = modules[0].id;
+        drop(conn);
+
+        // Create issues: one with module, one without
+        for (title, mid) in [("With mod", Some(module_id)), ("No mod", None)] {
+            let mut body = serde_json::json!({
+                "project_id": project_id,
+                "title": title,
+            });
+            if let Some(m) = mid {
+                body["module_id"] = serde_json::json!(m);
+            }
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/issues")
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/projects/{project_id}/board?group_by=module"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let board: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // Should use actual module name, not "has_module"
+        assert!(
+            board.get("has_module").is_none(),
+            "should not use 'has_module' as key"
+        );
+        assert_eq!(board["Backend"].as_array().unwrap().len(), 1);
+        assert_eq!(board["unassigned"].as_array().unwrap().len(), 1);
     }
 
     // ── Auth endpoint tests ──────────────────────────────────
