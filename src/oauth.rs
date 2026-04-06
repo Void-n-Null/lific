@@ -407,10 +407,15 @@ async fn token_exchange(
             .into_response();
     }
 
-    // Validate client_id matches
-    if let Some(client_id) = &req.client_id
-        && *client_id != stored_client_id
-    {
+    // Validate client_id — required per OAuth 2.1 for public clients
+    let Some(client_id) = &req.client_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "invalid_request", "error_description": "missing client_id"})),
+        )
+            .into_response();
+    };
+    if *client_id != stored_client_id {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "invalid_grant"})),
