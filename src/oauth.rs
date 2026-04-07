@@ -497,10 +497,34 @@ struct RevokeRequest {
 
 async fn revoke_token(
     State(state): State<OAuthState>,
+    headers: axum::http::HeaderMap,
     axum::Form(req): axum::Form<RevokeRequest>,
 ) -> Response {
+    // Require authentication -- only authenticated users/tokens can revoke.
+    let caller_token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.trim().to_string());
+
+    let is_authenticated = match &caller_token {
+        Some(t) if t.starts_with("lific_sess_") => {
+            match state.db.write() {
+                Ok(conn) => crate::db::queries::users::validate_session(&conn, t).is_ok(),
+                Err(_) => false,
+            }
+        }
+        Some(t) if t.starts_with("lific_at_") => validate_oauth_token(&state.db, t),
+        Some(_) => true, // API keys validated by auth middleware if routed through it
+        None => false,
+    };
+
+    if !is_authenticated {
+        return (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+    }
+
     // RFC 7009 says the server MUST respond with 200 even if the token
-    // is invalid, already revoked, or unrecognized — to prevent token scanning.
+    // is invalid, already revoked, or unrecognized -- to prevent token scanning.
     // Hash the token before lookup since we store SHA-256 hashes.
     let token_hash = hex_encode(&Sha256::digest(req.token.as_bytes()));
     // RFC 7009: always return 200, but log DB errors instead of silently discarding
@@ -873,7 +897,7 @@ mod tests {
         // Token should be valid
         assert!(validate_oauth_token(&db, token));
 
-        // Revoke it
+        // Revoke it (must be authenticated)
         let body = format!("token={token}");
         let resp = app
             .clone()
@@ -882,6 +906,7 @@ mod tests {
                     .method("POST")
                     .uri("/oauth/revoke")
                     .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", format!("Bearer {token}"))
                     .body(axum::body::Body::from(body))
                     .unwrap(),
             )
@@ -894,10 +919,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_unknown_token_returns_200() {
+    async fn revoke_unauthenticated_returns_401() {
         let (app, _) = test_oauth_app();
 
-        // RFC 7009: always return 200, even for unknown tokens
+        // Without auth, revoke should be rejected
         let body = "token=lific_at_nonexistent";
         let resp = app
             .clone()
@@ -906,6 +931,44 @@ mod tests {
                     .method("POST")
                     .uri("/oauth/revoke")
                     .header("content-type", "application/x-www-form-urlencoded")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn revoke_unknown_token_returns_200() {
+        let (app, db) = test_oauth_app();
+
+        // Create a valid token so we can authenticate the revoke request
+        let auth_token = "lific_at_auth-for-revoke";
+        let auth_hash = hex_encode(&Sha256::digest(auth_token.as_bytes()));
+        let expires = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+        {
+            let conn = db.write().unwrap();
+            conn.execute(
+                "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ('revoke-test', 'Test', '[\"http://localhost\"]')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO oauth_tokens (access_token, client_id, expires_at, scope) VALUES (?1, 'revoke-test', ?2, 'mcp')",
+                params![auth_hash, expires],
+            ).unwrap();
+        }
+
+        // RFC 7009: always return 200, even for unknown tokens (when authenticated)
+        let body = "token=lific_at_nonexistent";
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/oauth/revoke")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("authorization", format!("Bearer {auth_token}"))
                     .body(axum::body::Body::from(body))
                     .unwrap(),
             )
