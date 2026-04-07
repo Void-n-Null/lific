@@ -62,6 +62,7 @@ base64 = "0.22"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+hmac = { version = "0.12", features = ["std"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

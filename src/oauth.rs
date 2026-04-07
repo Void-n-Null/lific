@@ -5,12 +5,48 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
+use hmac::{Hmac, Mac};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::info;
 
 use crate::db::DbPool;
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Per-process CSRF secret, generated randomly on startup.
+static CSRF_SECRET: std::sync::LazyLock<[u8; 32]> =
+    std::sync::LazyLock::new(|| rand::random());
+
+/// Generate a CSRF token: timestamp.hmac(timestamp)
+fn generate_csrf_token() -> String {
+    let ts = chrono::Utc::now().timestamp();
+    let mut mac = HmacSha256::new_from_slice(&*CSRF_SECRET).unwrap();
+    mac.update(ts.to_le_bytes().as_ref());
+    let sig = hex_encode(&mac.finalize().into_bytes());
+    format!("{ts}.{sig}")
+}
+
+/// Validate a CSRF token. Returns true if valid and not older than 10 minutes.
+fn validate_csrf_token(token: &str) -> bool {
+    let Some((ts_str, sig)) = token.split_once('.') else {
+        return false;
+    };
+    let Ok(ts) = ts_str.parse::<i64>() else {
+        return false;
+    };
+    // Check expiry (10 minutes)
+    let now = chrono::Utc::now().timestamp();
+    if now - ts > 600 || ts > now + 60 {
+        return false;
+    }
+    // Verify HMAC
+    let mut mac = HmacSha256::new_from_slice(&*CSRF_SECRET).unwrap();
+    mac.update(ts.to_le_bytes().as_ref());
+    let expected = hex_encode(&mac.finalize().into_bytes());
+    expected == sig
+}
 
 #[derive(Clone)]
 pub struct OAuthState {
@@ -149,7 +185,7 @@ struct AuthorizeParams {
 }
 
 async fn authorize_page(Query(params): Query<AuthorizeParams>) -> Html<String> {
-    // Simple approval page -- single user, just click approve
+    let csrf_token = generate_csrf_token();
     Html(format!(
         r#"<!DOCTYPE html>
 <html>
@@ -177,6 +213,7 @@ async fn authorize_page(Query(params): Query<AuthorizeParams>) -> Html<String> {
         <input type="hidden" name="code_challenge" value="{code_challenge}">
         <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
         <input type="hidden" name="scope" value="{scope}">
+        <input type="hidden" name="csrf_token" value="{csrf_token}">
         <button type="submit">Approve</button>
     </form>
 </body>
@@ -189,6 +226,7 @@ async fn authorize_page(Query(params): Query<AuthorizeParams>) -> Html<String> {
         code_challenge_method =
             html_escape(params.code_challenge_method.as_deref().unwrap_or("S256")),
         scope = html_escape(params.scope.as_deref().unwrap_or("mcp")),
+        csrf_token = html_escape(&csrf_token),
     ))
 }
 
@@ -203,6 +241,7 @@ struct ApproveForm {
     code_challenge_method: Option<String>,
     #[allow(dead_code)]
     scope: Option<String>,
+    csrf_token: Option<String>,
 }
 
 async fn authorize_approve(
@@ -210,7 +249,19 @@ async fn authorize_approve(
     headers: axum::http::HeaderMap,
     axum::Form(form): axum::Form<ApproveForm>,
 ) -> Response {
-    // Require authentication — the person approving must be identified.
+    // Validate CSRF token to prevent cross-site form submission attacks
+    match &form.csrf_token {
+        Some(token) if validate_csrf_token(token) => {}
+        _ => {
+            return (
+                StatusCode::FORBIDDEN,
+                Html("<h1>Invalid or expired form</h1><p>Please go back and try again. <a href=\"/#/\">Return to Lific</a></p>".to_string()),
+            )
+                .into_response();
+        }
+    }
+
+    // Require authentication -- the person approving must be identified.
     // Extract a session token from either the Authorization header or a cookie,
     // then validate it against the database to ensure it's a real, non-expired session.
     let token = headers
@@ -673,18 +724,24 @@ mod tests {
         session.token
     }
 
+    /// Build the form body for an authorize POST, including a valid CSRF token.
+    fn authorize_body(client_id: &str, redirect_uri: &str) -> String {
+        let csrf = generate_csrf_token();
+        format!(
+            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp&csrf_token={}",
+            client_id,
+            urlencoding::encode(redirect_uri),
+            urlencoding::encode(&csrf),
+        )
+    }
+
     // ── LIF-48: authorize_approve validates tokens ───────────
 
     #[tokio::test]
     async fn authorize_rejects_missing_auth() {
         let (app, _db) = test_oauth_app();
         let client_id = register_client_helper(&app, "http://localhost/callback").await;
-
-        let body = format!(
-            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
-            client_id,
-            urlencoding::encode("http://localhost/callback"),
-        );
+        let body = authorize_body(&client_id, "http://localhost/callback");
         let resp = app
             .clone()
             .oneshot(
@@ -704,12 +761,7 @@ mod tests {
     async fn authorize_rejects_garbage_bearer_token() {
         let (app, _db) = test_oauth_app();
         let client_id = register_client_helper(&app, "http://localhost/callback").await;
-
-        let body = format!(
-            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
-            client_id,
-            urlencoding::encode("http://localhost/callback"),
-        );
+        let body = authorize_body(&client_id, "http://localhost/callback");
         let resp = app
             .clone()
             .oneshot(
@@ -730,12 +782,7 @@ mod tests {
     async fn authorize_rejects_fake_cookie_token() {
         let (app, _db) = test_oauth_app();
         let client_id = register_client_helper(&app, "http://localhost/callback").await;
-
-        let body = format!(
-            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
-            client_id,
-            urlencoding::encode("http://localhost/callback"),
-        );
+        let body = authorize_body(&client_id, "http://localhost/callback");
         let resp = app
             .clone()
             .oneshot(
@@ -757,12 +804,7 @@ mod tests {
         let (app, db) = test_oauth_app();
         let session_token = create_test_session(&db);
         let client_id = register_client_helper(&app, "http://localhost/callback").await;
-
-        let body = format!(
-            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
-            client_id,
-            urlencoding::encode("http://localhost/callback"),
-        );
+        let body = authorize_body(&client_id, "http://localhost/callback");
         let resp = app
             .clone()
             .oneshot(
@@ -789,12 +831,7 @@ mod tests {
         let (app, db) = test_oauth_app();
         let session_token = create_test_session(&db);
         let client_id = register_client_helper(&app, "http://localhost/callback").await;
-
-        let body = format!(
-            "client_id={}&redirect_uri={}&response_type=code&code_challenge=abc&code_challenge_method=S256&scope=mcp",
-            client_id,
-            urlencoding::encode("http://localhost/callback"),
-        );
+        let body = authorize_body(&client_id, "http://localhost/callback");
         let resp = app
             .clone()
             .oneshot(
