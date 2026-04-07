@@ -1,3 +1,5 @@
+pub mod exec;
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -15,6 +17,10 @@ pub struct Cli {
     /// Path to the SQLite database file (overrides config)
     #[arg(long, global = true)]
     pub db: Option<PathBuf>,
+
+    /// Output as JSON (for scripting/agent consumption)
+    #[arg(long, global = true)]
+    pub json: bool,
 
     #[command(subcommand)]
     pub command: Command,
@@ -49,6 +55,463 @@ pub enum Command {
     User {
         #[command(subcommand)]
         action: UserAction,
+    },
+
+    /// Manage issues
+    Issue {
+        #[command(subcommand)]
+        action: IssueAction,
+    },
+
+    /// Manage projects
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
+
+    /// Manage pages (documentation)
+    Page {
+        #[command(subcommand)]
+        action: PageAction,
+    },
+
+    /// Search issues and pages
+    Search {
+        /// Search query text
+        query: String,
+
+        /// Filter to a specific project (identifier, e.g. LIF)
+        #[arg(short, long)]
+        project: Option<String>,
+
+        /// Max results (default 20)
+        #[arg(short, long)]
+        limit: Option<i64>,
+    },
+
+    /// Manage comments on issues
+    Comment {
+        #[command(subcommand)]
+        action: CommentAction,
+    },
+
+    /// Manage modules
+    Module {
+        #[command(subcommand)]
+        action: ModuleAction,
+    },
+
+    /// Manage labels
+    Label {
+        #[command(subcommand)]
+        action: LabelAction,
+    },
+
+    /// Manage folders
+    Folder {
+        #[command(subcommand)]
+        action: FolderAction,
+    },
+}
+
+// ── Issue ────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum IssueAction {
+    /// List issues in a project
+    List {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Filter by status: backlog, todo, active, done, cancelled
+        #[arg(short, long)]
+        status: Option<String>,
+
+        /// Filter by priority: urgent, high, medium, low, none
+        #[arg(long)]
+        priority: Option<String>,
+
+        /// Filter by module name
+        #[arg(short, long)]
+        module: Option<String>,
+
+        /// Filter by label name
+        #[arg(short, long)]
+        label: Option<String>,
+
+        /// Only show workable issues (no unresolved blockers)
+        #[arg(short, long)]
+        workable: bool,
+
+        /// Max results (default 50)
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+
+    /// Get a single issue by identifier (e.g. LIF-42)
+    Get {
+        /// Issue identifier (e.g. LIF-42)
+        identifier: String,
+    },
+
+    /// Create a new issue
+    Create {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Issue title
+        #[arg(short, long)]
+        title: String,
+
+        /// Issue description (markdown)
+        #[arg(short, long, default_value = "")]
+        description: String,
+
+        /// Status: backlog, todo, active, done, cancelled
+        #[arg(short, long, default_value = "backlog")]
+        status: String,
+
+        /// Priority: urgent, high, medium, low, none
+        #[arg(long, default_value = "none")]
+        priority: String,
+
+        /// Module name to assign to
+        #[arg(short, long)]
+        module: Option<String>,
+
+        /// Labels to attach (comma-separated)
+        #[arg(short, long)]
+        labels: Option<String>,
+    },
+
+    /// Update an existing issue
+    Update {
+        /// Issue identifier (e.g. LIF-42)
+        identifier: String,
+
+        /// New title
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// New description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// New status
+        #[arg(short, long)]
+        status: Option<String>,
+
+        /// New priority
+        #[arg(long)]
+        priority: Option<String>,
+
+        /// New module name
+        #[arg(short, long)]
+        module: Option<String>,
+
+        /// Replace labels (comma-separated)
+        #[arg(short, long)]
+        labels: Option<String>,
+    },
+}
+
+// ── Project ──────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum ProjectAction {
+    /// List all projects
+    List,
+
+    /// Get a single project by identifier
+    Get {
+        /// Project identifier (e.g. LIF)
+        identifier: String,
+    },
+
+    /// Create a new project
+    Create {
+        /// Project name
+        #[arg(short, long)]
+        name: String,
+
+        /// Short identifier (max 5 chars, e.g. LIF)
+        #[arg(short, long)]
+        identifier: String,
+
+        /// Description
+        #[arg(short, long, default_value = "")]
+        description: String,
+    },
+
+    /// Update an existing project
+    Update {
+        /// Project identifier (e.g. LIF)
+        identifier: String,
+
+        /// New name
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// New description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+}
+
+// ── Page ─────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum PageAction {
+    /// List pages in a project (or workspace pages if no project)
+    List {
+        /// Project identifier (e.g. LIF). Omit for workspace pages.
+        #[arg(short, long)]
+        project: Option<String>,
+
+        /// Filter by folder name
+        #[arg(short, long)]
+        folder: Option<String>,
+    },
+
+    /// Get a single page by identifier (e.g. LIF-DOC-1)
+    Get {
+        /// Page identifier (e.g. LIF-DOC-1 or DOC-1)
+        identifier: String,
+    },
+
+    /// Create a new page
+    Create {
+        /// Page title
+        #[arg(short, long)]
+        title: String,
+
+        /// Project identifier (e.g. LIF). Omit for workspace page.
+        #[arg(short, long)]
+        project: Option<String>,
+
+        /// Folder name to place page in
+        #[arg(short, long)]
+        folder: Option<String>,
+
+        /// Page content (markdown)
+        #[arg(short, long, default_value = "")]
+        content: String,
+    },
+
+    /// Update an existing page
+    Update {
+        /// Page identifier (e.g. LIF-DOC-1)
+        identifier: String,
+
+        /// New title
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// New content
+        #[arg(short, long)]
+        content: Option<String>,
+
+        /// Move to folder name
+        #[arg(short, long)]
+        folder: Option<String>,
+    },
+}
+
+// ── Comment ──────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum CommentAction {
+    /// List comments on an issue
+    List {
+        /// Issue identifier (e.g. LIF-42)
+        identifier: String,
+    },
+
+    /// Add a comment to an issue
+    Add {
+        /// Issue identifier (e.g. LIF-42)
+        identifier: String,
+
+        /// Comment content (markdown)
+        #[arg(short, long)]
+        content: String,
+
+        /// Username of the comment author (defaults to first admin user)
+        #[arg(short, long)]
+        user: Option<String>,
+    },
+}
+
+// ── Module ───────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum ModuleAction {
+    /// List modules in a project
+    List {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+    },
+
+    /// Create a new module
+    Create {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Module name
+        #[arg(short, long)]
+        name: String,
+
+        /// Description
+        #[arg(short, long, default_value = "")]
+        description: String,
+
+        /// Status: backlog, planned, active, paused, done, cancelled
+        #[arg(short, long, default_value = "active")]
+        status: String,
+    },
+
+    /// Update a module
+    Update {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Current module name
+        #[arg(short, long)]
+        name: String,
+
+        /// New name
+        #[arg(long)]
+        new_name: Option<String>,
+
+        /// New description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// New status
+        #[arg(short, long)]
+        status: Option<String>,
+    },
+
+    /// Delete a module
+    Delete {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Module name
+        #[arg(short, long)]
+        name: String,
+    },
+}
+
+// ── Label ────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum LabelAction {
+    /// List labels in a project
+    List {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+    },
+
+    /// Create a new label
+    Create {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Label name
+        #[arg(short, long)]
+        name: String,
+
+        /// Color hex (e.g. #EF4444)
+        #[arg(short, long, default_value = "#6B7280")]
+        color: String,
+    },
+
+    /// Update a label
+    Update {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Current label name
+        #[arg(short, long)]
+        name: String,
+
+        /// New name
+        #[arg(long)]
+        new_name: Option<String>,
+
+        /// New color hex
+        #[arg(short, long)]
+        color: Option<String>,
+    },
+
+    /// Delete a label
+    Delete {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Label name
+        #[arg(short, long)]
+        name: String,
+    },
+}
+
+// ── Folder ───────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum FolderAction {
+    /// List folders in a project
+    List {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+    },
+
+    /// Create a new folder
+    Create {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Folder name
+        #[arg(short, long)]
+        name: String,
+    },
+
+    /// Update a folder
+    Update {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Current folder name
+        #[arg(short, long)]
+        name: String,
+
+        /// New name
+        #[arg(long)]
+        new_name: String,
+    },
+
+    /// Delete a folder
+    Delete {
+        /// Project identifier (e.g. LIF)
+        #[arg(short, long)]
+        project: String,
+
+        /// Folder name
+        #[arg(short, long)]
+        name: String,
     },
 }
 
@@ -147,6 +610,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lific", "start"]).unwrap();
         assert!(cli.config.is_none());
         assert!(cli.db.is_none());
+        assert!(!cli.json);
         match cli.command {
             Command::Start { port, host } => {
                 assert!(port.is_none());
@@ -306,5 +770,268 @@ mod tests {
     #[test]
     fn missing_subcommand_errors() {
         assert!(Cli::try_parse_from(["lific"]).is_err());
+    }
+
+    // ── Issue CLI tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_issue_list() {
+        let cli =
+            Cli::try_parse_from(["lific", "issue", "list", "--project", "LIF"]).unwrap();
+        match cli.command {
+            Command::Issue {
+                action: IssueAction::List { project, status, priority, module, label, workable, limit },
+            } => {
+                assert_eq!(project, "LIF");
+                assert!(status.is_none());
+                assert!(priority.is_none());
+                assert!(module.is_none());
+                assert!(label.is_none());
+                assert!(!workable);
+                assert!(limit.is_none());
+            }
+            _ => panic!("expected Issue List"),
+        }
+    }
+
+    #[test]
+    fn parse_issue_list_with_filters() {
+        let cli = Cli::try_parse_from([
+            "lific", "issue", "list",
+            "--project", "LIF",
+            "--status", "active",
+            "--priority", "urgent",
+            "--workable",
+            "--limit", "10",
+        ]).unwrap();
+        match cli.command {
+            Command::Issue {
+                action: IssueAction::List { project, status, priority, workable, limit, .. },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(status, Some("active".into()));
+                assert_eq!(priority, Some("urgent".into()));
+                assert!(workable);
+                assert_eq!(limit, Some(10));
+            }
+            _ => panic!("expected Issue List"),
+        }
+    }
+
+    #[test]
+    fn parse_issue_get() {
+        let cli = Cli::try_parse_from(["lific", "issue", "get", "LIF-42"]).unwrap();
+        match cli.command {
+            Command::Issue {
+                action: IssueAction::Get { identifier },
+            } => assert_eq!(identifier, "LIF-42"),
+            _ => panic!("expected Issue Get"),
+        }
+    }
+
+    #[test]
+    fn parse_issue_create() {
+        let cli = Cli::try_parse_from([
+            "lific", "issue", "create",
+            "--project", "LIF",
+            "--title", "Fix bug",
+            "--priority", "high",
+            "--labels", "bug,urgent",
+        ]).unwrap();
+        match cli.command {
+            Command::Issue {
+                action: IssueAction::Create { project, title, priority, labels, status, .. },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(title, "Fix bug");
+                assert_eq!(priority, "high");
+                assert_eq!(status, "backlog");
+                assert_eq!(labels, Some("bug,urgent".into()));
+            }
+            _ => panic!("expected Issue Create"),
+        }
+    }
+
+    #[test]
+    fn parse_issue_update() {
+        let cli = Cli::try_parse_from([
+            "lific", "issue", "update", "LIF-42",
+            "--status", "done",
+        ]).unwrap();
+        match cli.command {
+            Command::Issue {
+                action: IssueAction::Update { identifier, status, title, .. },
+            } => {
+                assert_eq!(identifier, "LIF-42");
+                assert_eq!(status, Some("done".into()));
+                assert!(title.is_none());
+            }
+            _ => panic!("expected Issue Update"),
+        }
+    }
+
+    // ── Project CLI tests ────────────────────────────────────
+
+    #[test]
+    fn parse_project_list() {
+        let cli = Cli::try_parse_from(["lific", "project", "list"]).unwrap();
+        assert!(matches!(cli.command, Command::Project { action: ProjectAction::List }));
+    }
+
+    #[test]
+    fn parse_project_create() {
+        let cli = Cli::try_parse_from([
+            "lific", "project", "create",
+            "--name", "My Project",
+            "--identifier", "MP",
+        ]).unwrap();
+        match cli.command {
+            Command::Project {
+                action: ProjectAction::Create { name, identifier, description },
+            } => {
+                assert_eq!(name, "My Project");
+                assert_eq!(identifier, "MP");
+                assert_eq!(description, "");
+            }
+            _ => panic!("expected Project Create"),
+        }
+    }
+
+    // ── Search CLI test ──────────────────────────────────────
+
+    #[test]
+    fn parse_search() {
+        let cli = Cli::try_parse_from([
+            "lific", "search", "auth flow",
+            "--project", "LIF",
+        ]).unwrap();
+        match cli.command {
+            Command::Search { query, project, limit } => {
+                assert_eq!(query, "auth flow");
+                assert_eq!(project, Some("LIF".into()));
+                assert!(limit.is_none());
+            }
+            _ => panic!("expected Search"),
+        }
+    }
+
+    // ── Comment CLI tests ────────────────────────────────────
+
+    #[test]
+    fn parse_comment_list() {
+        let cli = Cli::try_parse_from(["lific", "comment", "list", "LIF-42"]).unwrap();
+        match cli.command {
+            Command::Comment {
+                action: CommentAction::List { identifier },
+            } => assert_eq!(identifier, "LIF-42"),
+            _ => panic!("expected Comment List"),
+        }
+    }
+
+    #[test]
+    fn parse_comment_add() {
+        let cli = Cli::try_parse_from([
+            "lific", "comment", "add", "LIF-42",
+            "--content", "Looking into this",
+        ]).unwrap();
+        match cli.command {
+            Command::Comment {
+                action: CommentAction::Add { identifier, content, user },
+            } => {
+                assert_eq!(identifier, "LIF-42");
+                assert_eq!(content, "Looking into this");
+                assert!(user.is_none());
+            }
+            _ => panic!("expected Comment Add"),
+        }
+    }
+
+    // ── Module CLI tests ─────────────────────────────────────
+
+    #[test]
+    fn parse_module_list() {
+        let cli = Cli::try_parse_from(["lific", "module", "list", "--project", "LIF"]).unwrap();
+        match cli.command {
+            Command::Module {
+                action: ModuleAction::List { project },
+            } => assert_eq!(project, "LIF"),
+            _ => panic!("expected Module List"),
+        }
+    }
+
+    #[test]
+    fn parse_module_create() {
+        let cli = Cli::try_parse_from([
+            "lific", "module", "create",
+            "--project", "LIF",
+            "--name", "Core",
+        ]).unwrap();
+        match cli.command {
+            Command::Module {
+                action: ModuleAction::Create { project, name, status, .. },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(name, "Core");
+                assert_eq!(status, "active");
+            }
+            _ => panic!("expected Module Create"),
+        }
+    }
+
+    // ── Label CLI tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_label_create() {
+        let cli = Cli::try_parse_from([
+            "lific", "label", "create",
+            "--project", "LIF",
+            "--name", "bug",
+            "--color", "#EF4444",
+        ]).unwrap();
+        match cli.command {
+            Command::Label {
+                action: LabelAction::Create { project, name, color },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(name, "bug");
+                assert_eq!(color, "#EF4444");
+            }
+            _ => panic!("expected Label Create"),
+        }
+    }
+
+    // ── Folder CLI tests ─────────────────────────────────────
+
+    #[test]
+    fn parse_folder_create() {
+        let cli = Cli::try_parse_from([
+            "lific", "folder", "create",
+            "--project", "LIF",
+            "--name", "Architecture",
+        ]).unwrap();
+        match cli.command {
+            Command::Folder {
+                action: FolderAction::Create { project, name },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(name, "Architecture");
+            }
+            _ => panic!("expected Folder Create"),
+        }
+    }
+
+    // ── JSON flag test ───────────────────────────────────────
+
+    #[test]
+    fn parse_json_flag() {
+        let cli = Cli::try_parse_from(["lific", "--json", "project", "list"]).unwrap();
+        assert!(cli.json);
+        assert!(matches!(cli.command, Command::Project { action: ProjectAction::List }));
+    }
+
+    #[test]
+    fn json_flag_defaults_to_false() {
+        let cli = Cli::try_parse_from(["lific", "project", "list"]).unwrap();
+        assert!(!cli.json);
     }
 }

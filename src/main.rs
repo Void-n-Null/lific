@@ -22,6 +22,15 @@ use axum::{
 use clap::Parser;
 use cli::{Cli, Command, KeyAction, UserAction};
 use config::Config;
+
+// Commands that operate directly on the database (no server required)
+fn is_crud_command(cmd: &Command) -> bool {
+    matches!(cmd,
+        Command::Issue { .. } | Command::Project { .. } | Command::Page { .. } |
+        Command::Search { .. } | Command::Comment { .. } | Command::Module { .. } |
+        Command::Label { .. } | Command::Folder { .. }
+    )
+}
 use rmcp::{
     ServiceExt,
     transport::streamable_http_server::{
@@ -82,6 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // CLI overrides
     if let Some(ref db) = cli.db {
         cfg.database.path = db.clone();
+    }
+
+    // Handle CRUD commands (direct database access, no server needed)
+    if is_crud_command(&cli.command) {
+        let pool = db::open(&cfg.database.path)?;
+        return cli::exec::run(&pool, &cli.command, cli.json).map_err(Into::into);
     }
 
     match cli.command {
@@ -399,6 +414,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let handle = server.serve(transport).await?;
             handle.waiting().await?;
         }
+
+        // CRUD commands are handled before this match
+        Command::Issue { .. } | Command::Project { .. } | Command::Page { .. } |
+        Command::Search { .. } | Command::Comment { .. } | Command::Module { .. } |
+        Command::Label { .. } | Command::Folder { .. } => unreachable!(),
     }
 
     Ok(())
