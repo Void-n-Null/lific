@@ -140,6 +140,26 @@ CLI flags (`--db`, `--port`, `--host`) override config values.
 
 ## Building from source
 
+### Requirements
+
+- **Rust 1.88+** (edition 2024) -- required
+- **Bun** -- optional, only needed if you want the web UI
+
+SQLite is bundled via `rusqlite` and compiled into the binary. No system SQLite required.
+
+### API-only build (no web UI)
+
+```bash
+git clone https://github.com/VoidNullable/lific
+cd lific
+mkdir -p web/dist
+cargo build --release
+```
+
+The `mkdir -p web/dist` creates the empty directory that `rust-embed` expects at compile time. The resulting binary has full functionality (MCP, REST API, CLI, OAuth, backups) but visiting the web UI will return a message pointing you to build the frontend.
+
+### Full build (with web UI)
+
 ```bash
 git clone https://github.com/VoidNullable/lific
 cd lific
@@ -147,7 +167,7 @@ cd web && bun install && bun run build && cd ..
 cargo build --release
 ```
 
-Requires Rust 1.88+ (edition 2024). SQLite is bundled. The web frontend is optional — the binary works without it, you just won't have the UI.
+The frontend is a Svelte 5 SPA built with Vite. `bun run build` outputs static files to `web/dist/`, which `cargo build` embeds into the binary. The final binary is fully self-contained with no runtime dependencies.
 
 ## Contributing
 
