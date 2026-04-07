@@ -76,12 +76,6 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             name: lific-macos-aarch64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            name: lific-windows-x86_64.exe
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-            name: lific-windows-aarch64.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -106,13 +100,8 @@ jobs:
         if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Rename binary (unix)
-        if: runner.os != 'Windows'
+      - name: Rename binary
         run: cp target/${{ matrix.target }}/release/lific ${{ matrix.name }}
-
-      - name: Rename binary (windows)
-        if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/lific.exe ${{ matrix.name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -156,8 +145,6 @@ jobs:
             binaries/lific-linux-aarch64
             binaries/lific-macos-x86_64
             binaries/lific-macos-aarch64
-            binaries/lific-windows-x86_64.exe
-            binaries/lific-windows-aarch64.exe
             binaries/sha256sums.txt
 
   publish:
