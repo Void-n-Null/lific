@@ -128,6 +128,11 @@ pub fn get_user_by_email(conn: &Connection, email: &str) -> Result<User, LificEr
     })
 }
 
+/// Pre-computed Argon2 hash of a dummy password, used to normalize timing
+/// when the requested user doesn't exist. This ensures login attempts for
+/// non-existent users take the same time as attempts with wrong passwords.
+const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 /// Look up a user by username or email and verify their password.
 /// Returns the user on success, or an error on wrong credentials.
 pub fn authenticate(conn: &Connection, identity: &str, password: &str) -> Result<User, LificError> {
@@ -137,18 +142,27 @@ pub fn authenticate(conn: &Connection, identity: &str, password: &str) -> Result
             "invalid username/email or password".into(),
         ));
     }
-    // Try username first, then email
-    let user = get_user_by_username(conn, identity)
-        .or_else(|_| get_user_by_email(conn, identity))
-        .map_err(|_| LificError::BadRequest("invalid username/email or password".into()))?;
+    // Try username first, then email.
+    // If the user doesn't exist, still run Argon2 against a dummy hash
+    // to prevent timing side-channel enumeration of valid usernames.
+    let user = get_user_by_username(conn, identity).or_else(|_| get_user_by_email(conn, identity));
 
-    if !verify_password(password, &user.password_hash)? {
-        return Err(LificError::BadRequest(
+    let (user, hash) = match user {
+        Ok(u) => {
+            let h = u.password_hash.clone();
+            (Some(u), h)
+        }
+        Err(_) => (None, DUMMY_HASH.to_string()),
+    };
+
+    let password_ok = verify_password(password, &hash).unwrap_or(false);
+
+    match user {
+        Some(u) if password_ok => Ok(u),
+        _ => Err(LificError::BadRequest(
             "invalid username/email or password".into(),
-        ));
+        )),
     }
-
-    Ok(user)
 }
 
 pub fn list_users(conn: &Connection) -> Result<Vec<User>, LificError> {
