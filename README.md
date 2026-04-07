@@ -37,6 +37,19 @@ On first run, Lific generates an API key and prints it to the console. Save it �
 
 Open `http://localhost:3456` to use the web UI. The first account you create is the admin.
 
+The CLI also works directly against the database — no server or auth required:
+
+```bash
+lific project list
+lific issue list --project APP
+lific issue create --project APP --title "Fix login bug" --priority high
+lific issue get APP-42
+lific issue update APP-42 --status done
+lific search "authentication" --project APP
+```
+
+Add `--json` to any command for machine-readable output.
+
 ## Connecting AI tools
 
 Point your MCP client at the server. Replace `your-api-key` with the key from first run (or create one with `lific key create --name my-key`).
@@ -107,6 +120,7 @@ Everything uses human-readable identifiers: `project="APP"` not `project_id=7`.
 | **User accounts** | Individual auth, per-tool bot identities, project lead permissions |
 | **OAuth 2.1** | PKCE, dynamic client registration, token revocation |
 | **Backups** | Automatic SQLite snapshots with configurable retention |
+| **CLI** | Full CRUD for issues, projects, pages, modules, labels, folders — no server needed |
 | **Single binary** | No runtime dependencies, embedded SQLite, ~15MB |
 
 ## Configuration
