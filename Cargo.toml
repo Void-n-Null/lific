@@ -30,6 +30,7 @@ crossbeam-queue = "0.3"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 
 # MCP
 rmcp = { version = "1", features = ["server", "transport-io", "transport-streamable-http-server", "macros"] }
@@ -47,6 +48,7 @@ rand = "0.8"
 # Static assets (embedded frontend)
 rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Encoding
 urlencoding = "2"

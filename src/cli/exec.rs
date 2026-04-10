@@ -12,6 +12,7 @@ pub fn run(pool: &DbPool, command: &Command, json: bool) -> Result<(), Box<dyn s
         Command::Issue { action } => issue(pool, action, json),
         Command::Project { action } => project(pool, action, json),
         Command::Page { action } => page(pool, action, json),
+        Command::Export { action } => export(pool, action, json),
         Command::Search {
             query,
             project,
@@ -23,6 +24,36 @@ pub fn run(pool: &DbPool, command: &Command, json: bool) -> Result<(), Box<dyn s
         Command::Folder { action } => folder(pool, action, json),
         _ => unreachable!("non-CRUD commands are handled in main.rs"),
     }
+}
+
+fn export(
+    pool: &DbPool,
+    action: &ExportAction,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let conn = pool.read()?;
+    let (bundle, output) = match action {
+        ExportAction::Issue { identifier, output } => {
+            (crate::export::export_issue(&conn, identifier)?, output)
+        }
+        ExportAction::Page { identifier, output } => {
+            (crate::export::export_page(&conn, identifier)?, output)
+        }
+        ExportAction::Project { project, output } => {
+            (crate::export::export_project(&conn, project)?, output)
+        }
+    };
+
+    let written = crate::export::write_bundle_to_directory(&bundle, output)?;
+    if json {
+        print_json(&written);
+    } else {
+        println!("Exported {} file(s) to {}", written.len(), output.display());
+        for path in written {
+            println!("  {}", path.display());
+        }
+    }
+    Ok(())
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -1125,6 +1156,33 @@ mod tests {
             },
         };
         run(&pool, &cmd, false).unwrap();
+    }
+
+    #[test]
+    fn exec_export_project_writes_files() {
+        let pool = test_pool();
+        seed_project(&pool, "TST");
+        seed_issue(&pool, "TST", "Export this issue");
+
+        let tmp = std::env::temp_dir().join(format!("lific-export-test-{}", std::process::id()));
+        if tmp.exists() {
+            std::fs::remove_dir_all(&tmp).unwrap();
+        }
+
+        let cmd = Command::Export {
+            action: ExportAction::Project {
+                project: "TST".into(),
+                output: tmp.clone(),
+            },
+        };
+        run(&pool, &cmd, false).unwrap();
+
+        let issue_path = tmp.join("TST/issues/tst-1-export-this-issue.md");
+        assert!(issue_path.exists());
+        let content = std::fs::read_to_string(issue_path).unwrap();
+        assert!(content.contains("identifier: TST-1"));
+
+        std::fs::remove_dir_all(tmp).unwrap();
     }
 
     #[test]

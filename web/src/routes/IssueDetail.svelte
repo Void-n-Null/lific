@@ -3,6 +3,7 @@
     resolveIssue,
     updateIssue,
     deleteIssue,
+    downloadIssueExport,
     listModules,
     listLabels,
     listComments,
@@ -17,6 +18,7 @@
     ArrowLeft, Ellipsis, Trash2, Plus, X, Check,
     CircleCheck, CircleX, CircleAlert,
     Circle, CircleDot, CircleDashed, CircleCheckBig,
+    Download,
   } from "lucide-svelte";
 
   function statusCssColor(s: string): string {
@@ -76,6 +78,8 @@
   let menuOpen = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
+  let exportError = $state("");
+  let exporting = $state(false);
 
   const STATUSES = [
     { value: "backlog", label: "Backlog" },
@@ -184,6 +188,15 @@
       confirmingDelete = false;
       menuOpen = false;
     }
+  }
+
+  async function exportMarkdown() {
+    if (!issue || exporting) return;
+    exporting = true;
+    exportError = "";
+    const res = await downloadIssueExport(issue.identifier);
+    if (!res.ok) exportError = res.error;
+    exporting = false;
   }
 
   // ── Save helpers ─────────────────────────────────────
@@ -387,13 +400,27 @@
         {issue.identifier}
       </span>
 
-      <!-- Save indicator -->
-      <div class="ml-auto text-[0.75rem] text-[var(--text-faint)]">
-        {#if saving}
-          <span class="animate-pulse">Saving...</span>
-        {:else if lastSaved}
-          Saved at {lastSaved}
+      <div class="ml-auto flex items-center gap-3">
+        {#if exportError}
+          <span class="text-[0.75rem] text-[var(--error)]">{exportError}</span>
         {/if}
+        <button
+          class="inline-flex items-center gap-1.5 text-[0.75rem] text-[var(--text-muted)]
+                 hover:text-[var(--text)] transition-colors rounded px-2 py-1
+                 hover:bg-[var(--bg-subtle)]"
+          onclick={exportMarkdown}
+          disabled={exporting}
+        >
+          <Download size={13} />
+          {exporting ? "Exporting..." : "Export markdown"}
+        </button>
+        <div class="text-[0.75rem] text-[var(--text-faint)]">
+          {#if saving}
+            <span class="animate-pulse">Saving...</span>
+          {:else if lastSaved}
+            Saved at {lastSaved}
+          {/if}
+        </div>
       </div>
     </div>
 

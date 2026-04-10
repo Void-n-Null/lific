@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod db;
 mod error;
+mod export;
 mod mcp;
 mod oauth;
 mod ratelimit;
@@ -27,6 +28,7 @@ use config::Config;
 fn is_crud_command(cmd: &Command) -> bool {
     matches!(cmd,
         Command::Issue { .. } | Command::Project { .. } | Command::Page { .. } |
+        Command::Export { .. } |
         Command::Search { .. } | Command::Comment { .. } | Command::Module { .. } |
         Command::Label { .. } | Command::Folder { .. }
     )
@@ -417,6 +419,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // CRUD commands are handled before this match
         Command::Issue { .. } | Command::Project { .. } | Command::Page { .. } |
+        Command::Export { .. } |
         Command::Search { .. } | Command::Comment { .. } | Command::Module { .. } |
         Command::Label { .. } | Command::Folder { .. } => unreachable!(),
     }

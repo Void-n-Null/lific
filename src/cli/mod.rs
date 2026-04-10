@@ -75,6 +75,12 @@ pub enum Command {
         action: PageAction,
     },
 
+    /// Export issues and pages as markdown
+    Export {
+        #[command(subcommand)]
+        action: ExportAction,
+    },
+
     /// Search issues and pages
     Search {
         /// Search query text
@@ -316,6 +322,41 @@ pub enum PageAction {
         /// Move to folder name
         #[arg(short, long)]
         folder: Option<String>,
+    },
+}
+
+// ── Export ───────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum ExportAction {
+    /// Export a single issue to a target directory
+    Issue {
+        /// Issue identifier (e.g. LIF-42)
+        identifier: String,
+
+        /// Output directory for exported files
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Export a single page to a target directory
+    Page {
+        /// Page identifier (e.g. LIF-DOC-1)
+        identifier: String,
+
+        /// Output directory for exported files
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Export a whole project to a target directory
+    Project {
+        /// Project identifier (e.g. LIF)
+        project: String,
+
+        /// Output directory for exported files
+        #[arg(short, long)]
+        output: PathBuf,
     },
 }
 
@@ -776,11 +817,19 @@ mod tests {
 
     #[test]
     fn parse_issue_list() {
-        let cli =
-            Cli::try_parse_from(["lific", "issue", "list", "--project", "LIF"]).unwrap();
+        let cli = Cli::try_parse_from(["lific", "issue", "list", "--project", "LIF"]).unwrap();
         match cli.command {
             Command::Issue {
-                action: IssueAction::List { project, status, priority, module, label, workable, limit },
+                action:
+                    IssueAction::List {
+                        project,
+                        status,
+                        priority,
+                        module,
+                        label,
+                        workable,
+                        limit,
+                    },
             } => {
                 assert_eq!(project, "LIF");
                 assert!(status.is_none());
@@ -797,16 +846,31 @@ mod tests {
     #[test]
     fn parse_issue_list_with_filters() {
         let cli = Cli::try_parse_from([
-            "lific", "issue", "list",
-            "--project", "LIF",
-            "--status", "active",
-            "--priority", "urgent",
+            "lific",
+            "issue",
+            "list",
+            "--project",
+            "LIF",
+            "--status",
+            "active",
+            "--priority",
+            "urgent",
             "--workable",
-            "--limit", "10",
-        ]).unwrap();
+            "--limit",
+            "10",
+        ])
+        .unwrap();
         match cli.command {
             Command::Issue {
-                action: IssueAction::List { project, status, priority, workable, limit, .. },
+                action:
+                    IssueAction::List {
+                        project,
+                        status,
+                        priority,
+                        workable,
+                        limit,
+                        ..
+                    },
             } => {
                 assert_eq!(project, "LIF");
                 assert_eq!(status, Some("active".into()));
@@ -832,15 +896,30 @@ mod tests {
     #[test]
     fn parse_issue_create() {
         let cli = Cli::try_parse_from([
-            "lific", "issue", "create",
-            "--project", "LIF",
-            "--title", "Fix bug",
-            "--priority", "high",
-            "--labels", "bug,urgent",
-        ]).unwrap();
+            "lific",
+            "issue",
+            "create",
+            "--project",
+            "LIF",
+            "--title",
+            "Fix bug",
+            "--priority",
+            "high",
+            "--labels",
+            "bug,urgent",
+        ])
+        .unwrap();
         match cli.command {
             Command::Issue {
-                action: IssueAction::Create { project, title, priority, labels, status, .. },
+                action:
+                    IssueAction::Create {
+                        project,
+                        title,
+                        priority,
+                        labels,
+                        status,
+                        ..
+                    },
             } => {
                 assert_eq!(project, "LIF");
                 assert_eq!(title, "Fix bug");
@@ -854,13 +933,17 @@ mod tests {
 
     #[test]
     fn parse_issue_update() {
-        let cli = Cli::try_parse_from([
-            "lific", "issue", "update", "LIF-42",
-            "--status", "done",
-        ]).unwrap();
+        let cli = Cli::try_parse_from(["lific", "issue", "update", "LIF-42", "--status", "done"])
+            .unwrap();
         match cli.command {
             Command::Issue {
-                action: IssueAction::Update { identifier, status, title, .. },
+                action:
+                    IssueAction::Update {
+                        identifier,
+                        status,
+                        title,
+                        ..
+                    },
             } => {
                 assert_eq!(identifier, "LIF-42");
                 assert_eq!(status, Some("done".into()));
@@ -875,19 +958,34 @@ mod tests {
     #[test]
     fn parse_project_list() {
         let cli = Cli::try_parse_from(["lific", "project", "list"]).unwrap();
-        assert!(matches!(cli.command, Command::Project { action: ProjectAction::List }));
+        assert!(matches!(
+            cli.command,
+            Command::Project {
+                action: ProjectAction::List
+            }
+        ));
     }
 
     #[test]
     fn parse_project_create() {
         let cli = Cli::try_parse_from([
-            "lific", "project", "create",
-            "--name", "My Project",
-            "--identifier", "MP",
-        ]).unwrap();
+            "lific",
+            "project",
+            "create",
+            "--name",
+            "My Project",
+            "--identifier",
+            "MP",
+        ])
+        .unwrap();
         match cli.command {
             Command::Project {
-                action: ProjectAction::Create { name, identifier, description },
+                action:
+                    ProjectAction::Create {
+                        name,
+                        identifier,
+                        description,
+                    },
             } => {
                 assert_eq!(name, "My Project");
                 assert_eq!(identifier, "MP");
@@ -901,17 +999,35 @@ mod tests {
 
     #[test]
     fn parse_search() {
-        let cli = Cli::try_parse_from([
-            "lific", "search", "auth flow",
-            "--project", "LIF",
-        ]).unwrap();
+        let cli =
+            Cli::try_parse_from(["lific", "search", "auth flow", "--project", "LIF"]).unwrap();
         match cli.command {
-            Command::Search { query, project, limit } => {
+            Command::Search {
+                query,
+                project,
+                limit,
+            } => {
                 assert_eq!(query, "auth flow");
                 assert_eq!(project, Some("LIF".into()));
                 assert!(limit.is_none());
             }
             _ => panic!("expected Search"),
+        }
+    }
+
+    #[test]
+    fn parse_export_project() {
+        let cli =
+            Cli::try_parse_from(["lific", "export", "project", "LIF", "--output", "/tmp/out"])
+                .unwrap();
+        match cli.command {
+            Command::Export {
+                action: ExportAction::Project { project, output },
+            } => {
+                assert_eq!(project, "LIF");
+                assert_eq!(output, PathBuf::from("/tmp/out"));
+            }
+            _ => panic!("expected Export Project"),
         }
     }
 
@@ -931,12 +1047,22 @@ mod tests {
     #[test]
     fn parse_comment_add() {
         let cli = Cli::try_parse_from([
-            "lific", "comment", "add", "LIF-42",
-            "--content", "Looking into this",
-        ]).unwrap();
+            "lific",
+            "comment",
+            "add",
+            "LIF-42",
+            "--content",
+            "Looking into this",
+        ])
+        .unwrap();
         match cli.command {
             Command::Comment {
-                action: CommentAction::Add { identifier, content, user },
+                action:
+                    CommentAction::Add {
+                        identifier,
+                        content,
+                        user,
+                    },
             } => {
                 assert_eq!(identifier, "LIF-42");
                 assert_eq!(content, "Looking into this");
@@ -962,13 +1088,24 @@ mod tests {
     #[test]
     fn parse_module_create() {
         let cli = Cli::try_parse_from([
-            "lific", "module", "create",
-            "--project", "LIF",
-            "--name", "Core",
-        ]).unwrap();
+            "lific",
+            "module",
+            "create",
+            "--project",
+            "LIF",
+            "--name",
+            "Core",
+        ])
+        .unwrap();
         match cli.command {
             Command::Module {
-                action: ModuleAction::Create { project, name, status, .. },
+                action:
+                    ModuleAction::Create {
+                        project,
+                        name,
+                        status,
+                        ..
+                    },
             } => {
                 assert_eq!(project, "LIF");
                 assert_eq!(name, "Core");
@@ -983,14 +1120,25 @@ mod tests {
     #[test]
     fn parse_label_create() {
         let cli = Cli::try_parse_from([
-            "lific", "label", "create",
-            "--project", "LIF",
-            "--name", "bug",
-            "--color", "#EF4444",
-        ]).unwrap();
+            "lific",
+            "label",
+            "create",
+            "--project",
+            "LIF",
+            "--name",
+            "bug",
+            "--color",
+            "#EF4444",
+        ])
+        .unwrap();
         match cli.command {
             Command::Label {
-                action: LabelAction::Create { project, name, color },
+                action:
+                    LabelAction::Create {
+                        project,
+                        name,
+                        color,
+                    },
             } => {
                 assert_eq!(project, "LIF");
                 assert_eq!(name, "bug");
@@ -1005,10 +1153,15 @@ mod tests {
     #[test]
     fn parse_folder_create() {
         let cli = Cli::try_parse_from([
-            "lific", "folder", "create",
-            "--project", "LIF",
-            "--name", "Architecture",
-        ]).unwrap();
+            "lific",
+            "folder",
+            "create",
+            "--project",
+            "LIF",
+            "--name",
+            "Architecture",
+        ])
+        .unwrap();
         match cli.command {
             Command::Folder {
                 action: FolderAction::Create { project, name },
@@ -1026,7 +1179,12 @@ mod tests {
     fn parse_json_flag() {
         let cli = Cli::try_parse_from(["lific", "--json", "project", "list"]).unwrap();
         assert!(cli.json);
-        assert!(matches!(cli.command, Command::Project { action: ProjectAction::List }));
+        assert!(matches!(
+            cli.command,
+            Command::Project {
+                action: ProjectAction::List
+            }
+        ));
     }
 
     #[test]

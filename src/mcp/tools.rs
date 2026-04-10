@@ -176,6 +176,19 @@ impl LificMcp {
         }
     }
 
+    #[tool(description = "Export a single issue as markdown. Returns the markdown content.")]
+    fn export_issue(&self, Parameters(input): Parameters<ExportIssueInput>) -> String {
+        match self.read(|conn| crate::export::export_issue(conn, &input.identifier)) {
+            Ok(bundle) => bundle
+                .files
+                .into_iter()
+                .next()
+                .map(|file| file.content)
+                .unwrap_or_else(|| "Error: issue export produced no files".into()),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
     #[tool(description = "Create a new issue in a project")]
     fn create_issue(&self, Parameters(input): Parameters<CreateIssueInput>) -> String {
         let pid = match resolve_project(&self.db, &input.project) {
@@ -341,6 +354,33 @@ impl LificMcp {
                 let mut out = format!("{} — {}\n", page.identifier, page.title);
                 if !page.content.is_empty() {
                     out.push_str(&format!("\n{}\n", page.content));
+                }
+                out
+            }
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Export a single page as markdown. Returns the markdown content.")]
+    fn export_page(&self, Parameters(input): Parameters<ExportPageInput>) -> String {
+        match self.read(|conn| crate::export::export_page(conn, &input.identifier)) {
+            Ok(bundle) => bundle
+                .files
+                .into_iter()
+                .next()
+                .map(|file| file.content)
+                .unwrap_or_else(|| "Error: page export produced no files".into()),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(description = "Export an entire project as markdown. Returns exported file paths.")]
+    fn export_project(&self, Parameters(input): Parameters<ExportProjectInput>) -> String {
+        match self.read(|conn| crate::export::export_project(conn, &input.project)) {
+            Ok(bundle) => {
+                let mut out = format!("{} exported file(s):\n", bundle.files.len());
+                for file in bundle.files {
+                    out.push_str(&format!("- {}\n", file.path));
                 }
                 out
             }

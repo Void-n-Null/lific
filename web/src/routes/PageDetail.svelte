@@ -3,10 +3,11 @@
     getPage,
     updatePage,
     deletePage,
+    downloadPageExport,
     type Page,
   } from "../lib/api";
   import Markdown from "../lib/Markdown.svelte";
-  import { ArrowLeft, Ellipsis, Trash2 } from "lucide-svelte";
+  import { ArrowLeft, Download, Ellipsis, Trash2 } from "lucide-svelte";
 
   let {
     navigate,
@@ -41,6 +42,8 @@
   let menuOpen = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
+  let exportError = $state("");
+  let exporting = $state(false);
 
   $effect(() => {
     const id = pageId;
@@ -89,6 +92,15 @@
       deleting = false;
       confirmingDelete = false;
     }
+  }
+
+  async function exportMarkdown() {
+    if (!page || exporting) return;
+    exporting = true;
+    exportError = "";
+    const res = await downloadPageExport(page.identifier);
+    if (!res.ok) exportError = res.error;
+    exporting = false;
   }
 
   // ── Title ────────────────────────────────────────────
@@ -195,6 +207,19 @@
 
       <!-- Save indicator + menu -->
       <div class="ml-auto flex items-center gap-2">
+        {#if exportError}
+          <span class="text-[0.75rem] text-[var(--error)]">{exportError}</span>
+        {/if}
+        <button
+          class="inline-flex items-center gap-1.5 text-[0.75rem] text-[var(--text-muted)]
+                 hover:text-[var(--text)] transition-colors rounded px-2 py-1
+                 hover:bg-[var(--bg-subtle)]"
+          onclick={exportMarkdown}
+          disabled={exporting}
+        >
+          <Download size={13} />
+          {exporting ? "Exporting..." : "Export markdown"}
+        </button>
         <span class="text-[0.75rem] text-[var(--text-faint)]">
           {#if saving}
             <span class="animate-pulse">Saving...</span>

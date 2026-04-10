@@ -38,13 +38,13 @@
       <h1 class="font-display text-[clamp(2.5rem,5vw,3.5rem)] leading-[1.1] tracking-tight text-[var(--panel-text)] mb-4">
         Lific
       </h1>
-      <p class="text-[1.0625rem] leading-relaxed text-[var(--panel-muted)] max-w-[20ch]">
-        Local-first issue tracking.<br />Single binary. No dependencies.
+      <p class="text-[1.0625rem] leading-relaxed text-[var(--panel-muted)] max-w-[24ch]">
+        Lightweight issue tracking built for AI-driven development.<br />Single binary. MCP built in.
       </p>
       <div class="flex items-center gap-2 mt-10 text-[0.8125rem] text-[var(--panel-muted)]">
-        <span>v0.1</span>
+        <span>v1.1.2</span>
         <span class="w-4 h-px bg-[var(--panel-muted)]"></span>
-        <span>SQLite + Rust + MCP</span>
+        <span>Designed for prolific projects</span>
       </div>
     </div>
   </aside>

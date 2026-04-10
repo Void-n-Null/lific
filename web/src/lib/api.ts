@@ -46,6 +46,40 @@ async function request<T>(
   }
 }
 
+export async function download(path: string, filename?: string) {
+  const token = localStorage.getItem("lific_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}${path}`, { headers });
+  if (!res.ok) {
+    let error = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      error = body.error || error;
+    } catch {
+      // Ignore parse failure and keep status-based message.
+    }
+    return { ok: false as const, error };
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download =
+    filename ||
+    res.headers
+      .get("content-disposition")
+      ?.match(/filename="([^"]+)"/)?.[1] ||
+    "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return { ok: true as const };
+}
+
 export async function signup(
   username: string,
   email: string,
@@ -229,6 +263,10 @@ export async function deleteProject(id: number) {
   });
 }
 
+export async function downloadProjectExport(identifier: string) {
+  return download(`/export/projects/${identifier}`);
+}
+
 // ── Issues ──────────────────────────────────────────────────
 
 export interface Issue {
@@ -317,6 +355,10 @@ export async function deleteIssue(id: number) {
   return request<{ deleted: boolean }>(`/issues/${id}`, {
     method: "DELETE",
   });
+}
+
+export async function downloadIssueExport(identifier: string) {
+  return download(`/export/issues/${identifier}`);
 }
 
 // ── Modules ─────────────────────────────────────────────────
@@ -436,6 +478,10 @@ export async function deletePage(id: number) {
   return request<{ deleted: boolean }>(`/pages/${id}`, {
     method: "DELETE",
   });
+}
+
+export async function downloadPageExport(identifier: string) {
+  return download(`/export/pages/${identifier}`);
 }
 
 export async function listFolders(projectId: number) {

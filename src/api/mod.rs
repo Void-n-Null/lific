@@ -1,5 +1,6 @@
 mod auth;
 mod comments;
+mod export;
 mod issues;
 mod pages;
 mod projects;
@@ -80,6 +81,9 @@ pub fn router(db: DbPool, cors_origins: &[String]) -> Router {
             "/api/issues/resolve/{identifier}",
             get(issues::resolve_issue),
         )
+        .route("/api/export/issues/{identifier}", get(export::export_issue))
+        .route("/api/export/pages/{identifier}", get(export::export_page))
+        .route("/api/export/projects/{identifier}", get(export::export_project))
         // Issue relations
         .route("/api/issues/link", post(issues::link_issues))
         .route("/api/issues/unlink", post(issues::unlink_issues))

@@ -191,3 +191,21 @@ pub struct ListCommentsInput {
     #[schemars(description = "Issue identifier (e.g. LIF-1)")]
     pub identifier: String,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportIssueInput {
+    #[schemars(description = "Issue identifier like PRO-42")]
+    pub identifier: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportPageInput {
+    #[schemars(description = "Page identifier like LIF-DOC-1")]
+    pub identifier: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportProjectInput {
+    #[schemars(description = "Project identifier (e.g. LIF)")]
+    pub project: String,
+}

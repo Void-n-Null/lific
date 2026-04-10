@@ -4,10 +4,11 @@
     listIssues,
     updateProject,
     deleteProject,
+    downloadProjectExport,
     type Project,
   } from "../lib/api";
   import ProjectForm from "../lib/ProjectForm.svelte";
-  import { ChevronRight } from "lucide-svelte";
+  import { ChevronRight, Download } from "lucide-svelte";
 
   let {
     navigate,
@@ -38,6 +39,8 @@
   let deleteConfirmText = $state("");
   let deleting = $state(false);
   let deleteError = $state("");
+  let exportError = $state("");
+  let exporting = $state(false);
 
   $effect(() => {
     const id = projectIdentifier;
@@ -131,6 +134,15 @@
       deleting = false;
     }
   }
+
+  async function exportProject() {
+    if (!project || exporting) return;
+    exporting = true;
+    exportError = "";
+    const res = await downloadProjectExport(project.identifier);
+    if (!res.ok) exportError = res.error;
+    exporting = false;
+  }
 </script>
 
 {#if loading}
@@ -173,6 +185,11 @@
       </div>
 
       <div class="ml-auto flex items-center gap-2">
+        {#if exportError}
+          <span class="text-[0.8125rem] text-[var(--error)] max-w-[min(280px,40vw)] truncate" title={exportError}>
+            {exportError}
+          </span>
+        {/if}
         {#if error}
           <span class="text-[0.8125rem] text-[var(--error)] max-w-[min(280px,40vw)] truncate" title={error}>
             {error}
@@ -181,6 +198,17 @@
         {#if saveSuccess}
           <span class="text-[0.8125rem] text-[var(--success)]">Saved</span>
         {/if}
+        <button
+          class="inline-flex items-center gap-1.5 text-[0.8125rem] font-medium
+                 text-[var(--text-muted)] px-3 py-1 rounded-md
+                 hover:bg-[var(--bg-subtle)] hover:text-[var(--text)] transition-colors
+                 disabled:opacity-40 disabled:cursor-not-allowed"
+          onclick={exportProject}
+          disabled={exporting}
+        >
+          <Download size={14} />
+          {exporting ? "Exporting..." : "Export markdown"}
+        </button>
         <button
           class="text-[0.8125rem] font-medium text-[var(--accent-text)]
                  bg-[var(--accent)] px-3 py-1 rounded-md
