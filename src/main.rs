@@ -333,9 +333,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // MCP StreamableHTTP service
             let db_for_mcp = pool.clone();
+            let mut mcp_allowed_hosts: Vec<String> =
+                vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
+
+            // If public_url is set, allow its hostname through the DNS rebinding check
+            // so reverse proxies (Tailscale funnel, nginx, etc.) can forward requests.
+            if let Some(ref url) = cfg.server.public_url {
+                if let Ok(parsed) = url.parse::<axum::http::Uri>() {
+                    if let Some(authority) = parsed.authority() {
+                        let host: String = authority.host().to_string();
+                        mcp_allowed_hosts.push(host);
+                    }
+                }
+            }
+
             let mcp_config = StreamableHttpServerConfig::default()
                 .with_stateful_mode(false)
-                .with_json_response(true);
+                .with_json_response(true)
+                .with_allowed_hosts(mcp_allowed_hosts);
 
             let mcp_service = StreamableHttpService::new(
                 move || Ok(mcp::LificMcp::new(db_for_mcp.clone())),

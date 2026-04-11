@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{ServerCapabilities, ServerInfo},
+    model::{ProtocolVersion, ServerCapabilities, ServerInfo},
 };
 
 use crate::db::DbPool;
@@ -83,12 +83,16 @@ impl LificMcp {
 
 impl ServerHandler for LificMcp {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Lific is a local-first issue tracker. Use list_resources(type='project') to discover projects. \
-             Use list_issues to browse issues with filters. Use get_issue with an identifier like 'PRO-42' \
-             for details. Use workable=true to find issues ready to work on (no unresolved blockers). \
-             Use search to find anything by text across issues and pages.",
-        )
+        // Pin to 2025-03-26: rmcp defaults to 2025-06-18 which many clients
+        // (including Zed) skipped, going straight from 2025-03-26 to 2025-11-25.
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2025_03_26)
+            .with_instructions(
+                "Lific is a local-first issue tracker. Use list_resources(type='project') to discover projects. \
+                 Use list_issues to browse issues with filters. Use get_issue with an identifier like 'PRO-42' \
+                 for details. Use workable=true to find issues ready to work on (no unresolved blockers). \
+                 Use search to find anything by text across issues and pages.",
+            )
     }
 
     fn list_tools(
